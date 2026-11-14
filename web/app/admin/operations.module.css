@@ -1,0 +1,15 @@
+.page { max-width: 1080px; margin: 0 auto; padding: 28px clamp(16px, 4vw, 36px) 56px; color: #10282e; }
+.nav, .heading, .pager { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.nav a, .card td a { color: #087e79; text-decoration: underline; text-underline-offset: 3px; }
+.heading { justify-content: space-between; margin-block: 20px; }
+.heading h1, .card h2 { margin: 0; }
+.card { margin-block: 16px; padding: 20px; background: white; border: 1px solid #dfe7e5; border-radius: 8px; overflow-x: auto; }
+.card table { width: 100%; min-width: 480px; border-collapse: collapse; text-align: left; }
+.card th, .card td { padding: 12px 10px; border-bottom: 1px solid #edf0f0; }
+.card td small { display: block; color: #66787c; margin-top: 4px; }
+.fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 16px; border: 0; margin: 0; padding: 0; }
+.chart { display: grid; gap: 8px; }
+.barRow { display: grid; grid-template-columns: 98px minmax(48px, 1fr) 72px; align-items: center; gap: 8px; font-size: .82rem; }
+.barRow meter { width: 100%; }
+.search { display: flex; align-items: end; flex-wrap: wrap; }
+.pager { margin-top: 14px; }

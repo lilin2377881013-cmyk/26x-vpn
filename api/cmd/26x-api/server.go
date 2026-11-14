@@ -76,6 +76,8 @@ func (s *server) routes() http.Handler {
 	mux.HandleFunc("POST /api/v1/me/devices", s.requireUser(s.withUserCSRF(s.registerDevice)))
 	mux.HandleFunc("DELETE /api/v1/me/devices/{id}", s.requireUser(s.withUserCSRF(s.revokeDevice)))
 	mux.HandleFunc("GET /api/v1/client/bootstrap", s.requireUser(s.clientBootstrap))
+	mux.HandleFunc("GET /api/v1/nodes", s.requireUser(s.clientBootstrap))
+	mux.HandleFunc("GET /api/v1/devices/{id}/credentials", s.requireUser(s.deviceCredentials))
 	mux.HandleFunc("PUT /api/v1/me/devices/{id}/connection-lease", s.requireUser(s.withUserCSRF(s.acquireConnectionLease)))
 	mux.HandleFunc("DELETE /api/v1/me/devices/{id}/connection-lease", s.requireUser(s.withUserCSRF(s.releaseConnectionLease)))
 	mux.HandleFunc("DELETE /api/v1/auth/session", s.requireUser(s.withUserCSRF(s.logout)))
@@ -92,8 +94,19 @@ func (s *server) routes() http.Handler {
 	mux.HandleFunc("GET /api/v1/admin/plans", s.requireAdmin(s.listPlans, "owner", "operations", "support"))
 	mux.HandleFunc("POST /api/v1/admin/plans", s.requireAdmin(s.withCSRF(s.createPlan), "owner", "operations"))
 	mux.HandleFunc("POST /api/v1/admin/users/{id}/subscriptions", s.requireAdmin(s.withCSRF(s.assignSubscription), "owner", "operations"))
-	mux.HandleFunc("GET /api/v1/admin/nodes", s.requireAdmin(s.listNodes, "owner", "operations", "support"))
-	mux.HandleFunc("POST /api/v1/admin/nodes", s.requireAdmin(s.withCSRF(s.createNode), "owner", "operations"))
+	mux.HandleFunc("GET /api/v1/admin/nodes", s.requireAdmin(s.scriptNodeList, "owner", "operations", "support"))
+	mux.HandleFunc("GET /api/v1/admin/nodes/records", s.requireAdmin(s.listNodes, "owner", "operations", "support"))
+	mux.HandleFunc("GET /api/v1/admin/nodes/{code}/health", s.requireAdmin(s.scriptNodeAction("health", 60*time.Second), "owner", "operations", "support"))
+	mux.HandleFunc("GET /api/v1/admin/nodes/{code}/traffic", s.requireAdmin(s.scriptNodeAction("traffic", 30*time.Second), "owner", "operations", "support"))
+	mux.HandleFunc("POST /api/v1/admin/nodes/{code}/pause", s.requireAdmin(s.withCSRF(s.scriptNodeAction("pause", 60*time.Second)), "owner", "operations"))
+	mux.HandleFunc("POST /api/v1/admin/nodes/{code}/resume", s.requireAdmin(s.withCSRF(s.scriptNodeAction("resume", 60*time.Second)), "owner", "operations"))
+	mux.HandleFunc("POST /api/v1/admin/nodes", s.requireAdmin(s.withCSRF(s.deployNode), "owner", "operations"))
+	mux.HandleFunc("POST /api/v1/admin/nodes/register", s.requireAdmin(s.withCSRF(s.createNode), "owner", "operations"))
+	mux.HandleFunc("GET /api/v1/admin/nodes/{code}", s.requireAdmin(s.getNode, "owner", "operations", "support"))
+	mux.HandleFunc("PUT /api/v1/admin/nodes/{code}", s.requireAdmin(s.withCSRF(s.editNode), "owner", "operations"))
+	mux.HandleFunc("DELETE /api/v1/admin/nodes/{code}", s.requireAdmin(s.withCSRF(s.removeNode), "owner", "operations"))
+	mux.HandleFunc("GET /api/v1/admin/nodes/{code}/stats", s.requireAdmin(s.nodeStats, "owner", "operations", "support"))
+	mux.HandleFunc("GET /api/v1/admin/users/{id}/usage", s.requireAdmin(s.userUsage, "owner", "operations", "support"))
 	mux.HandleFunc("PATCH /api/v1/admin/nodes/{id}/enabled", s.requireAdmin(s.withCSRF(s.setNodeEnabled), "owner", "operations"))
 	mux.HandleFunc("PATCH /api/v1/admin/nodes/{id}/health", s.requireAdmin(s.withCSRF(s.recordNodeHealth), "owner", "operations"))
 	mux.HandleFunc("GET /api/v1/admin/audit", s.requireAdmin(s.listAudit, "owner", "operations", "support"))
@@ -545,8 +558,16 @@ func (s *server) revokeDevice(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) clientBootstrap(w http.ResponseWriter, r *http.Request) {
+	s.writeClientNodes(w, r, r.URL.Query().Get("deviceId"), false)
+}
+
+func (s *server) deviceCredentials(w http.ResponseWriter, r *http.Request) {
+	s.writeClientNodes(w, r, r.PathValue("id"), true)
+}
+
+func (s *server) writeClientNodes(w http.ResponseWriter, r *http.Request, rawDeviceID string, credentialsOnly bool) {
 	current := actorFromContext(r)
-	deviceID := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("deviceId")))
+	deviceID := strings.ToLower(strings.TrimSpace(rawDeviceID))
 	if deviceID == "" {
 		writeError(w, http.StatusBadRequest, "device_required", "Register this device before requesting node configuration")
 		return
@@ -630,6 +651,12 @@ func (s *server) clientBootstrap(w http.ResponseWriter, r *http.Request) {
 				credentialStatus = "error"
 			}
 		}
+		if credentialsOnly {
+			if connectable {
+				items = append(items, map[string]any{"endpointId": endpointID, "connectionProfile": connectionProfile})
+			}
+			continue
+		}
 		items = append(items, map[string]any{"id": nodeID, "code": code, "name": name, "region": region, "status": status, "endpoint": map[string]any{"id": endpointID, "protocol": protocol, "host": host, "port": port, "transport": transport, "serverName": nullableString(serverName), "publicKey": nullableString(publicKey), "shortId": nullableString(shortID)}, "credentialStatus": credentialStatus, "connectable": connectable, "connectionProfile": connectionProfile})
 	}
 	if err := rows.Err(); err != nil {
@@ -670,12 +697,21 @@ func (s *server) listUsers(w http.ResponseWriter, r *http.Request) {
 		}
 		limit = parsed
 	}
+	offset := 0
+	if raw := r.URL.Query().Get("offset"); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 0 || parsed > 1000000 {
+			writeError(w, http.StatusBadRequest, "invalid_offset", "Offset must be between 0 and 1000000")
+			return
+		}
+		offset = parsed
+	}
 	query := "%" + strings.TrimSpace(r.URL.Query().Get("q")) + "%"
 	rows, err := s.db.QueryContext(r.Context(), `SELECT u.id::text, u.email::text, u.status, u.created_at,
 		(SELECT count(*) FROM devices d WHERE d.user_id = u.id AND d.revoked_at IS NULL),
 		(SELECT p.name FROM subscriptions sub JOIN plans p ON p.id = sub.plan_id WHERE sub.user_id = u.id AND sub.status = 'active' AND (sub.ends_at IS NULL OR sub.ends_at > now()) ORDER BY sub.ends_at DESC NULLS FIRST LIMIT 1),
 		(SELECT max(sub.ends_at) FROM subscriptions sub WHERE sub.user_id = u.id AND sub.status = 'active')
-		FROM users u WHERE u.email::text ILIKE $1 ORDER BY u.created_at DESC LIMIT $2`, query, limit)
+		FROM users u WHERE u.email::text ILIKE $1 ORDER BY u.created_at DESC, u.id LIMIT $2 OFFSET $3`, query, limit+1, offset)
 	if err != nil {
 		s.logger.Error("list users", "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Unable to read users")
@@ -703,7 +739,11 @@ func (s *server) listUsers(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Unable to read users")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": users, "limit": limit})
+	hasMore := len(users) > limit
+	if hasMore {
+		users = users[:limit]
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": users, "limit": limit, "offset": offset, "hasMore": hasMore})
 }
 
 func (s *server) createUser(w http.ResponseWriter, r *http.Request) {
@@ -1002,13 +1042,17 @@ func (s *server) assignSubscription(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, map[string]any{"id": subscriptionID, "planName": planName, "startsAt": starts.Format(time.RFC3339), "endsAt": ends.Format(time.RFC3339)})
 }
 
-func (s *server) listNodes(w http.ResponseWriter, r *http.Request) {
-	rows, err := s.db.QueryContext(r.Context(), `SELECT n.id::text, n.code, n.name, n.region_code, n.status, n.health_checked_at,
+func (s *server) readNodes(ctx context.Context, code string) ([]map[string]any, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT n.id::text, n.code, n.name, n.region_code, n.status, n.health_checked_at,
+		n.capacity_limit, n.ssh_port, n.ssh_user,
+		(SELECT count(DISTINCT d.user_id) FROM node_endpoints ne
+		 JOIN device_node_credentials c ON c.endpoint_id=ne.id AND c.status='active' AND c.revoked_at IS NULL
+		 JOIN devices d ON d.id=c.device_id AND d.revoked_at IS NULL WHERE ne.node_id=n.id),
 		e.id::text, e.protocol, e.host, e.port, e.transport, e.server_name, e.public_key, e.short_id, e.enabled
-		FROM nodes n LEFT JOIN node_endpoints e ON e.node_id = n.id ORDER BY n.name, e.protocol`)
+		FROM nodes n LEFT JOIN node_endpoints e ON e.node_id = n.id
+		WHERE $1 = '' OR n.code = $1 ORDER BY n.name, e.protocol, e.id`, code)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Unable to read nodes")
-		return
+		return nil, err
 	}
 	defer rows.Close()
 	nodes := make([]map[string]any, 0)
@@ -1016,12 +1060,14 @@ func (s *server) listNodes(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var id, code, name, region, status string
 		var checked sql.NullTime
+		var capacity sql.NullInt64
+		var sshPort, users int64
+		var sshUser string
 		var endpointID, protocol, host, transport, serverName, publicKey, shortID sql.NullString
 		var port sql.NullInt64
 		var enabled sql.NullBool
-		if err := rows.Scan(&id, &code, &name, &region, &status, &checked, &endpointID, &protocol, &host, &port, &transport, &serverName, &publicKey, &shortID, &enabled); err != nil {
-			writeError(w, http.StatusInternalServerError, "internal_error", "Unable to read nodes")
-			return
+		if err := rows.Scan(&id, &code, &name, &region, &status, &checked, &capacity, &sshPort, &sshUser, &users, &endpointID, &protocol, &host, &port, &transport, &serverName, &publicKey, &shortID, &enabled); err != nil {
+			return nil, err
 		}
 		node, ok := byID[id]
 		if !ok {
@@ -1029,7 +1075,11 @@ func (s *server) listNodes(w http.ResponseWriter, r *http.Request) {
 			if checked.Valid {
 				health = checked.Time.UTC().Format(time.RFC3339)
 			}
-			node = map[string]any{"id": id, "code": code, "name": name, "region": region, "status": status, "healthCheckedAt": health, "endpoints": make([]map[string]any, 0)}
+			var limit any
+			if capacity.Valid {
+				limit = capacity.Int64
+			}
+			node = map[string]any{"id": id, "code": code, "name": name, "region": region, "region_code": region, "status": status, "healthCheckedAt": health, "capacity_limit": limit, "ssh_port": sshPort, "ssh_user": sshUser, "users": users, "endpoints": make([]map[string]any, 0)}
 			byID[id] = node
 			nodes = append(nodes, node)
 		}
@@ -1039,7 +1089,16 @@ func (s *server) listNodes(w http.ResponseWriter, r *http.Request) {
 			node["endpoints"] = endpoints
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": nodes})
+	return nodes, rows.Err()
+}
+
+func (s *server) listNodes(w http.ResponseWriter, r *http.Request) {
+	nodes, err := s.readNodes(r.Context(), "")
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "Unable to read nodes")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"nodes": nodes, "items": nodes})
 }
 
 func (s *server) createNode(w http.ResponseWriter, r *http.Request) {

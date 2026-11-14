@@ -33,6 +33,7 @@ type config struct {
 	bootstrapPass  string
 	credentialKey  []byte
 	managedVLESS   *managedVLESS
+	nodeCommand    string
 }
 
 func main() {
@@ -113,6 +114,10 @@ func loadConfig() (config, error) {
 		trustedOrigins: make(map[string]bool),
 		bootstrapEmail: strings.TrimSpace(strings.ToLower(os.Getenv("INITIAL_ADMIN_EMAIL"))),
 		bootstrapPass:  os.Getenv("INITIAL_ADMIN_PASSWORD"),
+		nodeCommand:    env("NODE_COMMAND", "/opt/26x-node/bin/26x-node"),
+	}
+	if !filepath.IsAbs(cfg.nodeCommand) {
+		return cfg, errors.New("NODE_COMMAND must be an absolute path")
 	}
 	if cfg.databaseURL == "" {
 		return cfg, errors.New("DATABASE_URL is required")

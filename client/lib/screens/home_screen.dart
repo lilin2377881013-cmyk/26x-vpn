@@ -37,6 +37,17 @@ class _HomeScreenState extends State<HomeScreen> {
   TunnelSnapshot _tunnelState = const TunnelSnapshot(TunnelState.disconnected);
   bool _busy = false;
   int _tab = 0;
+  String _planTier = 'standard';
+  static const _pageColor = Color(0xFF191D27);
+  static const _panelColor = Color(0xFF242938);
+  static const _gold = Color(0xFFF0CA87);
+  static const _muted = Color(0xFFAFB9C9);
+  static const _flags = {
+    'HK': '🇭🇰',
+    'JP': '🇯🇵',
+    'SG': '🇸🇬',
+    'US': '🇺🇸',
+  };
   String? _message;
   String? _planError;
 
@@ -520,12 +531,12 @@ class _HomeScreenState extends State<HomeScreen> {
     const accent = Color(0xFF71DBC3);
     final active = _tab == 0;
     return Scaffold(
-      backgroundColor: active ? background : const Color(0xFFF1F5F5),
+      backgroundColor: _pageColor,
       appBar: AppBar(
         backgroundColor: background,
         foregroundColor: Colors.white,
         centerTitle: true,
-        title: Text(const ['26x', '套餐', '我的'][_tab]),
+        title: Text(const ['26x', '会员套餐', '个人中心'][_tab]),
         actions: [
           IconButton(
             tooltip: '刷新',
@@ -577,144 +588,241 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _detailsPage() => Center(
-    child: ConstrainedBox(
-      constraints: const BoxConstraints(maxWidth: 600),
-      child: ListView(
-        padding: const EdgeInsets.all(20),
-        children: [
-          if (_tab == 1) ...[
-            _planOverviewCard(),
-            const SizedBox(height: 16),
-            _planTierCard('standard', '普通档', Icons.shield_outlined),
-            const SizedBox(height: 12),
-            _planTierCard('premium', '豪华档', Icons.workspace_premium_outlined),
-            if (_planError != null) _messageBox(_planError!),
-            const SizedBox(height: 12),
-            const Text('套餐由管理员开通。'),
-          ] else
-            _accountCard(),
-          if (_message != null) ...[
-            const SizedBox(height: 12),
-            _messageBox(_message!),
+  Widget _detailsPage() => Theme(
+    data: ThemeData.dark(useMaterial3: true),
+    child: Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 780),
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(24, 24, 24, 32),
+          children: [
+            if (_tab == 1) _plansPage() else _accountCard(),
+            if (_message != null) ...[
+              const SizedBox(height: 12),
+              _messageBox(_message!),
+            ],
           ],
-        ],
+        ),
       ),
     ),
   );
 
-  Widget _accountCard() => _surface(
-    padding: const EdgeInsets.all(20),
-    child: Column(
+  Widget _plansPage() {
+    final premium = _planTier == 'premium';
+    final plans = _plans.where((plan) => plan.tier == _planTier).toList()
+      ..sort((a, b) => a.durationDays.compareTo(b.durationDays));
+    return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(
-          children: [
-            const Icon(Icons.person_outline_rounded, color: Color(0xFF087E79)),
-            const SizedBox(width: 9),
-            const Text(
-              '账户',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Text(
-                _account!.email,
-                textAlign: TextAlign.end,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(color: Color(0xFF607178), fontSize: 12),
+        Center(
+          child: SegmentedButton<String>(
+            segments: const [
+              ButtonSegment(value: 'standard', label: Text('普通档')),
+              ButtonSegment(value: 'premium', label: Text('豪华档')),
+            ],
+            selected: {_planTier},
+            onSelectionChanged: (selection) =>
+                setState(() => _planTier = selection.single),
+            showSelectedIcon: false,
+            style: ButtonStyle(
+              foregroundColor: WidgetStateProperty.resolveWith(
+                (states) => states.contains(WidgetState.selected)
+                    ? _gold
+                    : Colors.white,
+              ),
+              backgroundColor: WidgetStateProperty.resolveWith(
+                (states) => states.contains(WidgetState.selected)
+                    ? _panelColor
+                    : _pageColor,
               ),
             ),
-          ],
-        ),
-        Align(
-          alignment: Alignment.centerRight,
-          child: TextButton.icon(
-            onPressed: _busy ? null : _changePassword,
-            icon: const Icon(Icons.key_rounded, size: 15),
-            label: const Text('修改密码', style: TextStyle(fontSize: 11)),
           ),
         ),
-        const SizedBox(height: 16),
-        Row(
+        const SizedBox(height: 32),
+        const Text(
+          '套餐权益',
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: 19,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        const SizedBox(height: 14),
+        Wrap(
+          spacing: 12,
+          runSpacing: 10,
           children: [
-            const Text('本机设备', style: TextStyle(color: Color(0xFF6D7D83))),
-            const Spacer(),
-            if (_device != null)
-              Text(
-                _device!.label,
-                style: const TextStyle(fontWeight: FontWeight.w600),
-              ),
+            _benefit(Icons.devices_outlined, '可登录 ${premium ? 6 : 3} 台设备'),
+            _benefit(Icons.bolt_outlined, '同时在线 ${premium ? 2 : 1} 台'),
           ],
         ),
-        if (_device == null) ...[
-          const SizedBox(height: 12),
-          const Text(
-            '此安装尚未登记。登记后才能查看与本机相关的节点。',
-            style: TextStyle(color: Color(0xFF718188), fontSize: 13),
+        const SizedBox(height: 32),
+        const Text(
+          '套餐期限',
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: 19,
+            fontWeight: FontWeight.w700,
           ),
-          const SizedBox(height: 12),
-          OutlinedButton.icon(
-            onPressed: _busy ? null : _registerDevice,
-            icon: const Icon(Icons.add_rounded),
-            label: const Text('注册本机设备'),
-          ),
-        ],
-        if (_devices.isNotEmpty) ...[
-          const Divider(height: 28),
-          const Text(
-            '账户设备',
-            style: TextStyle(color: Color(0xFF6D7D83), fontSize: 12),
-          ),
-          const SizedBox(height: 6),
-          ..._devices.map(
-            (device) => Padding(
-              padding: const EdgeInsets.symmetric(vertical: 5),
-              child: Row(
+        ),
+        const SizedBox(height: 14),
+        if (_planError != null)
+          _messageBox('套餐加载失败，请刷新重试。')
+        else if (plans.isEmpty)
+          const Text('此档位暂无可用套餐。', style: TextStyle(color: _muted))
+        else
+          LayoutBuilder(
+            builder: (context, bounds) {
+              final columns = bounds.maxWidth >= 300 ? 3 : 1;
+              final width = (bounds.maxWidth - 20 * (columns - 1)) / columns;
+              return Wrap(
+                spacing: 20,
+                runSpacing: 12,
                 children: [
-                  Icon(
-                    _platformIcon(device.platform),
-                    size: 17,
-                    color: const Color(0xFF698087),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      '${device.label}${device.id == _device?.id ? ' · 本机' : ''}',
-                      style: const TextStyle(fontSize: 12),
+                  for (final plan in plans)
+                    Container(
+                      width: width,
+                      padding: const EdgeInsets.symmetric(
+                        vertical: 24,
+                        horizontal: 8,
+                      ),
+                      decoration: BoxDecoration(
+                        color: _panelColor,
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: Column(
+                        children: [
+                          Text(
+                            '${plan.durationDays} 天',
+                            style: const TextStyle(color: _muted),
+                          ),
+                          const SizedBox(height: 12),
+                          FittedBox(
+                            child: Text(
+                              _priceLabel(plan),
+                              style: const TextStyle(
+                                color: _gold,
+                                fontSize: 30,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                          Text(
+                            _quotaLabel(plan),
+                            style: const TextStyle(color: _muted, fontSize: 12),
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
-                  TextButton(
-                    onPressed: _busy ? null : () => _revokeDevice(device),
-                    child: const Text('撤销', style: TextStyle(fontSize: 11)),
-                  ),
                 ],
-              ),
-            ),
+              );
+            },
           ),
-        ],
-        if (_account!.subscriptionEndsAt != null) ...[
-          const Divider(height: 28),
-          Row(
+        const SizedBox(height: 16),
+        const Text('套餐由管理员开通。', style: TextStyle(color: _muted)),
+      ],
+    );
+  }
+
+  Widget _benefit(IconData icon, String label) => Chip(
+    avatar: Icon(icon, size: 18, color: _gold),
+    label: Text(label),
+    backgroundColor: _panelColor,
+  );
+
+  Widget _accountCard() {
+    final account = _account!;
+    final endsAt = account.subscriptionEndsAt;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(
+          account.email,
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 18,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const SizedBox(height: 20),
+        Container(
+          padding: const EdgeInsets.all(22),
+          decoration: BoxDecoration(
+            gradient: const LinearGradient(
+              colors: [Color(0xFFFFDEA3), Color(0xFFCEA460)],
+            ),
+            borderRadius: BorderRadius.circular(18),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text('订阅有效期至', style: TextStyle(color: Color(0xFF6D7D83))),
-              const Spacer(),
               Text(
-                _date(_account!.subscriptionEndsAt!),
-                style: const TextStyle(fontWeight: FontWeight.w600),
+                account.planName ?? '暂未开通套餐',
+                style: const TextStyle(
+                  color: Color(0xFF292115),
+                  fontSize: 21,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              if (endsAt != null) ...[
+                const SizedBox(height: 8),
+                Text(
+                  '有效期至 ${_date(endsAt)}',
+                  style: const TextStyle(color: Color(0xFF4C3920)),
+                ),
+              ],
+              TextButton(
+                style: TextButton.styleFrom(
+                  foregroundColor: const Color(0xFF292115),
+                  padding: EdgeInsets.zero,
+                ),
+                onPressed: () => setState(() => _tab = 1),
+                child: const Text('查看套餐'),
               ),
             ],
           ),
-        ],
-        const SizedBox(height: 12),
-        TextButton.icon(
-          onPressed: _busy ? null : _signOut,
-          icon: const Icon(Icons.logout_rounded),
-          label: const Text('退出登录'),
+        ),
+        const SizedBox(height: 20),
+        ListTile(
+          leading: const Icon(Icons.lock_outline),
+          title: const Text('修改密码'),
+          trailing: const Icon(Icons.chevron_right),
+          onTap: _busy ? null : _changePassword,
+        ),
+        const Divider(height: 1),
+        ExpansionTile(
+          leading: const Icon(Icons.devices_outlined),
+          title: const Text('设备管理'),
+          subtitle: Text(_device == null ? '本机未登记' : '${_devices.length} 台已登记'),
+          children: [
+            if (_device == null)
+              ListTile(
+                title: const Text('注册本机设备'),
+                onTap: _busy ? null : _registerDevice,
+              ),
+            for (final device in _devices)
+              ListTile(
+                leading: Icon(_platformIcon(device.platform)),
+                title: Text(
+                  '${device.label}${device.id == _device?.id ? ' · 本机' : ''}',
+                ),
+                trailing: TextButton(
+                  onPressed: _busy ? null : () => _revokeDevice(device),
+                  child: const Text('撤销'),
+                ),
+              ),
+          ],
+        ),
+        const Divider(height: 1),
+        ListTile(
+          leading: const Icon(Icons.logout_rounded),
+          title: const Text('退出登录'),
+          onTap: _busy ? null : _signOut,
         ),
       ],
-    ),
-  );
+    );
+  }
 
   Future<void> _loadPlans() async {
     try {
@@ -728,134 +836,6 @@ class _HomeScreenState extends State<HomeScreen> {
       if (!mounted) return;
       setState(() => _planError = error.toString());
     }
-  }
-
-  Widget _planOverviewCard() => _surface(
-    padding: const EdgeInsets.all(18),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Row(
-          children: [
-            Icon(Icons.workspace_premium_outlined, color: Color(0xFF087E79)),
-            SizedBox(width: 9),
-            Text(
-              '套餐档位',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
-            ),
-          ],
-        ),
-        Text(
-          _account?.planName ?? '当前：暂未开通套餐',
-          style: const TextStyle(color: Color(0xFF607178), fontSize: 13),
-        ),
-        const SizedBox(height: 12),
-        Row(
-          children: [
-            _tierBadge('普通档', selected: _account?.planTier == 'standard'),
-            const SizedBox(width: 8),
-            _tierBadge('豪华档', selected: _account?.planTier == 'premium'),
-          ],
-        ),
-      ],
-    ),
-  );
-
-  Widget _tierBadge(String label, {required bool selected}) => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 7),
-    decoration: BoxDecoration(
-      color: selected ? const Color(0xFFE1F3ED) : const Color(0xFFF2F5F5),
-      borderRadius: BorderRadius.circular(20),
-      border: Border.all(
-        color: selected ? const Color(0xFF8CCAC0) : const Color(0xFFE5EBEB),
-      ),
-    ),
-    child: Text(
-      label,
-      style: TextStyle(
-        color: selected ? const Color(0xFF087E79) : const Color(0xFF65767B),
-        fontSize: 12,
-        fontWeight: FontWeight.w600,
-      ),
-    ),
-  );
-
-  Widget _planTierCard(String tier, String title, IconData icon) {
-    final plans = _plans.where((plan) => plan.tier == tier).toList();
-    return _surface(
-      padding: const EdgeInsets.all(17),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(icon, color: const Color(0xFF087E79)),
-              const SizedBox(width: 9),
-              Text(
-                title,
-                style: const TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-              const Spacer(),
-              if (_account?.planTier == tier)
-                const Text(
-                  '当前档位',
-                  style: TextStyle(
-                    color: Color(0xFF13856C),
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          if (plans.isEmpty)
-            const Text(
-              '此档位暂无已开放的套餐周期',
-              style: TextStyle(color: Color(0xFF718188), fontSize: 13),
-            )
-          else
-            ...plans.map(
-              (plan) => Padding(
-                padding: const EdgeInsets.only(top: 7),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            plan.name,
-                            style: const TextStyle(fontWeight: FontWeight.w600),
-                          ),
-                          const SizedBox(height: 3),
-                          Text(
-                            '${plan.durationDays} 天 · ${plan.maxDevices} 台 · ${_quotaLabel(plan)}',
-                            style: const TextStyle(
-                              color: Color(0xFF718188),
-                              fontSize: 11,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    Text(
-                      _priceLabel(plan),
-                      style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w800,
-                        color: Color(0xFF087E79),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-        ],
-      ),
-    );
   }
 
   Widget _connectionCard() {
@@ -970,7 +950,10 @@ class _HomeScreenState extends State<HomeScreen> {
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            const Icon(Icons.public_rounded, size: 20),
+                            if (_flags[region] case final String flag)
+                              Text(flag, style: const TextStyle(fontSize: 20))
+                            else
+                              const Icon(Icons.public_rounded, size: 20),
                             const SizedBox(width: 12),
                             Text(label),
                             const SizedBox(width: 24),
@@ -993,102 +976,93 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Future<void> _showRegions() => showModalBottomSheet<void>(
-    context: context,
-    showDragHandle: true,
-    useSafeArea: true,
-    builder: (context) => SingleChildScrollView(
-      padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Text('选择地区', style: Theme.of(context).textTheme.titleLarge),
-          const SizedBox(height: 14),
-          for (final region in _nodeRegions.entries)
-            _nodeRegion(
-              region.value,
-              _nodes.where((node) => _regionCode(node) == region.key),
+  Future<void> _showRegions() async {
+    final node = await Navigator.of(context).push<VpnNode>(
+      MaterialPageRoute(
+        builder: (routeContext) {
+          final codes = _nodes.map(_regionCode).toSet();
+          final regions = {
+            ..._nodeRegions,
+            for (final code in codes.where(
+              (code) => !_nodeRegions.containsKey(code),
+            ))
+              code: code,
+          };
+          return Theme(
+            data: ThemeData.dark(useMaterial3: true),
+            child: Scaffold(
+              backgroundColor: _pageColor,
+              appBar: AppBar(
+                backgroundColor: _pageColor,
+                foregroundColor: Colors.white,
+                centerTitle: true,
+                title: const Text('选择线路'),
+              ),
+              body: ListView(
+                children: [
+                  const ColoredBox(
+                    color: _panelColor,
+                    child: Padding(
+                      padding: EdgeInsets.symmetric(
+                        horizontal: 24,
+                        vertical: 14,
+                      ),
+                      child: Text('海外线路', style: TextStyle(color: _muted)),
+                    ),
+                  ),
+                  for (final region in regions.entries)
+                    _regionRow(routeContext, region.key, region.value),
+                ],
+              ),
             ),
-          ..._nodes
-              .where((node) => !_nodeRegions.containsKey(_regionCode(node)))
-              .map(_nodeTile),
-        ],
+          );
+        },
       ),
-    ),
-  );
+    );
+    if (!mounted || node == null || _busy || _isConnecting) return;
+    if (_isConnected) {
+      await _connectTo(node, switchRegion: true);
+    } else {
+      setState(() => _selectedNode = node);
+    }
+  }
 
   String _regionCode(VpnNode node) => node.region.trim().toUpperCase();
 
-  Widget _nodeRegion(String name, Iterable<VpnNode> nodes) {
+  Widget _regionRow(BuildContext routeContext, String code, String name) {
+    final nodes = _nodes.where((node) => _regionCode(node) == code);
     final node =
         nodes.where((node) => node.connectable).firstOrNull ??
         nodes.firstOrNull;
-    if (node == null) {
-      return ListTile(title: Text(name), trailing: const Text('待发布'));
-    }
-    return _nodeTile(node, name: name);
-  }
-
-  Widget _nodeTile(VpnNode node, {String? name}) {
     final selected =
-        _selectedNode != null &&
-        _regionCode(_selectedNode!) == _regionCode(node);
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 9),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(15),
-        onTap:
-            _busy ||
-                _isConnecting ||
-                (_isConnected && (selected || !node.connectable))
-            ? null
-            : () {
-                Navigator.of(context).pop();
-                if (_isConnected) {
-                  unawaited(_connectTo(node, switchRegion: true));
-                } else {
-                  setState(() => _selectedNode = node);
-                }
-              },
-        child: Container(
-          padding: const EdgeInsets.all(13),
-          decoration: BoxDecoration(
-            color: selected ? const Color(0xFFE8F4F1) : const Color(0xFFF7F9F9),
-            borderRadius: BorderRadius.circular(15),
-            border: Border.all(
-              color: selected
-                  ? const Color(0xFF8CCAC0)
-                  : const Color(0xFFE6ECEC),
+        _selectedNode != null && _regionCode(_selectedNode!) == code;
+    final available = node?.connectable == true;
+    return ListTile(
+      contentPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 5),
+      leading: _flags[code] == null
+          ? const Icon(Icons.public_rounded)
+          : Text(_flags[code]!, style: const TextStyle(fontSize: 24)),
+      title: Text(name),
+      selected: selected,
+      selectedColor: _gold,
+      onTap: node == null || (_isConnected && (selected || !available))
+          ? null
+          : () => Navigator.of(routeContext).pop(node),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (!available)
+            Text(
+              node == null ? '待发布' : '待配置',
+              style: const TextStyle(color: _muted),
             ),
+          const SizedBox(width: 12),
+          Icon(
+            selected ? Icons.radio_button_checked : Icons.radio_button_off,
+            size: 20,
+            color: selected ? _gold : _muted,
           ),
-          child: Row(
-            children: [
-              const Icon(Icons.public_rounded, color: Color(0xFF087E79)),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      name ?? node.name,
-                      style: const TextStyle(fontWeight: FontWeight.w700),
-                    ),
-                  ],
-                ),
-              ),
-              Text(
-                node.connectable ? '可连接' : '待配置',
-                style: TextStyle(
-                  color: node.connectable
-                      ? const Color(0xFF13856C)
-                      : const Color(0xFF977942),
-                  fontSize: 11,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ],
-          ),
-        ),
+        ],
       ),
     );
   }

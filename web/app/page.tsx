@@ -39,7 +39,6 @@ export default async function HomePage() {
         <div className="hero-copy">
           <div className="eyebrow">26x VPN</div>
           <h1>一键连接<br /><em>随时切换地区</em></h1>
-          <p className="hero-lede">在客户端选择并切换线路。国内 IPv4 地址按客户端规则直连，其余 IPv4 流量默认走 VPN 隧道。</p>
           <div className="hero-actions"><a className="button" href="#downloads">下载 26x <span aria-hidden="true">↓</span></a><a className="text-link" href="/support">获取帮助 →</a></div>
         </div>
         <div className="app-preview" aria-hidden="true">

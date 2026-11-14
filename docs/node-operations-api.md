@@ -113,3 +113,24 @@ mark the record revoked. Preserve managed rows owned by the API reconciler.
 The four initial endpoints have a profile for the registered macOS test
 device. Independent credentials on the regional nodes are issued by the
 operator's grant script.
+
+## Trial and checkout
+
+Migration 009 adds an anonymous trial account for each installation token.
+`POST /api/v1/auth/trial` accepts the platform and a random, base64url
+installation token. Keep the token in secure storage. The human-readable
+`trialCode` from `GET /api/v1/me` is an identifier only. The 15-minute
+window starts when the account is created. Retrying with the same
+installation token preserves the account and expiry.
+
+The trial currently requires an online managed VLESS endpoint with
+`MANAGED_VLESS_REQUIRE_LEASE=true`. Set `MANAGED_VLESS_TRIAL_ONLY=true` on a
+regional deployment and supply a dedicated managed endpoint. Trial accounts
+use that endpoint, and paid accounts continue to use regional allocation.
+Existing unmanaged credentials cannot enforce trial expiry on the node.
+
+`POST /api/v1/me/checkout` requires a user session and CSRF token. Its
+JSON request is `{"planCode":"standard-30d"}`. The API validates the plan
+against the active priced catalog and currently returns
+`503 payment_unavailable`. Integrate the payment provider in this handler
+using server-side prices and grant a subscription after verified payment.

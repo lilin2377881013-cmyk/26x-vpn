@@ -22,10 +22,18 @@ type managedVLESS struct {
 	helper       string
 	xray         string
 	requireLease bool
+	trialOnly    bool
 }
 
 func (s *server) nodeRequiresLease() bool {
 	return s.cfg.managedVLESS != nil && s.cfg.managedVLESS.requireLease
+}
+
+func (s *server) managedEndpointID() any {
+	if s.cfg.managedVLESS == nil {
+		return nil
+	}
+	return s.cfg.managedVLESS.endpoint
 }
 
 func (s *server) syncManagedCredentials(ctx context.Context) {
@@ -68,7 +76,8 @@ func (s *server) queueManagedCredentials(ctx context.Context) error {
 		LEFT JOIN device_node_credentials c ON c.device_id = d.id AND c.endpoint_id = e.id
 		WHERE (`+eligibleDevice+`) AND (c.id IS NULL OR c.managed AND c.status = 'revoked')
 		AND (NOT $2 OR EXISTS (SELECT 1 FROM connection_leases l WHERE l.device_id = d.id AND l.expires_at > now()))
-		ORDER BY d.created_at, d.id LIMIT 32`, endpoint, s.nodeRequiresLease())
+		AND (NOT $3 OR EXISTS(SELECT 1 FROM trial_accounts WHERE user_id=d.user_id))
+		ORDER BY d.created_at, d.id LIMIT 32`, endpoint, s.nodeRequiresLease(), s.cfg.managedVLESS.trialOnly)
 	if err != nil {
 		return err
 	}

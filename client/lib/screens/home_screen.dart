@@ -107,6 +107,36 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  Future<void> _startTrial() async {
+    setState(() {
+      _busy = true;
+      _message = null;
+    });
+    try {
+      _account = await widget.api.startTrial(_platform);
+      await _loadDevices();
+      unawaited(_loadPlans());
+    } catch (error) {
+      if (mounted) setState(() => _message = error.toString());
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _checkout(VpnPlan plan) async {
+    setState(() {
+      _busy = true;
+      _message = null;
+    });
+    try {
+      await widget.api.checkout(plan.code);
+    } catch (error) {
+      if (mounted) setState(() => _message = error.toString());
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   Future<void> _loadDevices() async {
     _devices = await widget.api.devices();
     final localId = await widget.api.localDeviceId();
@@ -117,8 +147,12 @@ class _HomeScreenState extends State<HomeScreen> {
         break;
       }
     }
-    if (_device != null) await _loadNodes();
-    if (_device == null) {
+    final trialExpired =
+        _account?.trialCode != null &&
+        _account?.subscriptionEndsAt?.isAfter(DateTime.now()) != true;
+    if (_device != null && !trialExpired) await _loadNodes();
+    if (trialExpired) _message = '15 分钟试用已结束。';
+    if (_device == null || trialExpired) {
       _nodes = [];
       _selectedNode = null;
     }
@@ -458,7 +492,7 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           const SizedBox(height: 8),
           const Text(
-            '使用管理员为你创建的账户登录。',
+            '登录账户或开始免费试用。',
             style: TextStyle(color: Color(0xFF66777D), height: 1.5),
           ),
           const SizedBox(height: 26),
@@ -513,12 +547,10 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
           const SizedBox(height: 18),
-          const Text(
-            '账户由 26x 管理员开通；暂不支持客户端自助注册。',
-            style: TextStyle(
-              fontSize: 12,
-              color: Color(0xFF809096),
-              height: 1.5,
+          Center(
+            child: TextButton(
+              onPressed: _busy ? null : _startTrial,
+              child: const Text('新用户免费试用 15 分钟'),
             ),
           ),
         ],
@@ -742,6 +774,11 @@ class _HomeScreenState extends State<HomeScreen> {
                             _quotaLabel(plan),
                             style: const TextStyle(color: _muted, fontSize: 12),
                           ),
+                          const SizedBox(height: 8),
+                          TextButton(
+                            onPressed: _busy ? null : () => _checkout(plan),
+                            child: const Text('购买'),
+                          ),
                         ],
                       ),
                     ),
@@ -750,7 +787,6 @@ class _HomeScreenState extends State<HomeScreen> {
             },
           ),
         const SizedBox(height: 16),
-        const Text('套餐由管理员开通。', style: TextStyle(color: _muted)),
       ],
     );
   }
@@ -794,7 +830,9 @@ class _HomeScreenState extends State<HomeScreen> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Text(
-          account.email,
+          account.trialCode == null
+              ? account.email
+              : '试用识别码 ${account.trialCode}',
           style: const TextStyle(
             color: Colors.white,
             fontSize: 18,
@@ -824,7 +862,9 @@ class _HomeScreenState extends State<HomeScreen> {
               if (endsAt != null) ...[
                 const SizedBox(height: 8),
                 Text(
-                  '有效期至 ${_date(endsAt)}',
+                  account.trialCode == null
+                      ? '有效期至 ${_date(endsAt)}'
+                      : '试用截止 ${MaterialLocalizations.of(context).formatTimeOfDay(TimeOfDay.fromDateTime(endsAt.toLocal()))}',
                   style: const TextStyle(color: Color(0xFF4C3920)),
                 ),
               ],
@@ -844,7 +884,7 @@ class _HomeScreenState extends State<HomeScreen> {
           leading: const Icon(Icons.lock_outline),
           title: const Text('修改密码'),
           trailing: const Icon(Icons.chevron_right),
-          onTap: _busy ? null : _changePassword,
+          onTap: _busy || account.trialCode != null ? null : _changePassword,
         ),
         const Divider(height: 1),
         ExpansionTile(
@@ -1044,31 +1084,55 @@ class _HomeScreenState extends State<HomeScreen> {
             ))
               code: code,
           };
+          final premium = _account?.planTier == 'premium';
           return Theme(
             data: ThemeData.dark(useMaterial3: true),
-            child: Scaffold(
-              backgroundColor: _pageColor,
-              appBar: AppBar(
+            child: DefaultTabController(
+              length: 2,
+              initialIndex: premium ? 1 : 0,
+              child: Scaffold(
                 backgroundColor: _pageColor,
-                foregroundColor: Colors.white,
-                centerTitle: true,
-                title: const Text('选择线路'),
-              ),
-              body: ListView(
-                children: [
-                  const ColoredBox(
-                    color: _panelColor,
-                    child: Padding(
-                      padding: EdgeInsets.symmetric(
-                        horizontal: 24,
-                        vertical: 14,
-                      ),
-                      child: Text('海外线路', style: TextStyle(color: _muted)),
-                    ),
+                appBar: AppBar(
+                  backgroundColor: _pageColor,
+                  foregroundColor: Colors.white,
+                  centerTitle: true,
+                  title: const Text('选择线路'),
+                  bottom: const TabBar(
+                    tabs: [
+                      Tab(text: '普通线路'),
+                      Tab(text: '豪华线路'),
+                    ],
                   ),
-                  for (final region in regions.entries)
-                    _regionRow(routeContext, region.key, region.value),
-                ],
+                ),
+                body: TabBarView(
+                  children: [
+                    for (final locked in [false, !premium])
+                      ListView(
+                        children: [
+                          const ColoredBox(
+                            color: _panelColor,
+                            child: Padding(
+                              padding: EdgeInsets.symmetric(
+                                horizontal: 24,
+                                vertical: 14,
+                              ),
+                              child: Text(
+                                '海外线路',
+                                style: TextStyle(color: _muted),
+                              ),
+                            ),
+                          ),
+                          for (final region in regions.entries)
+                            _regionRow(
+                              routeContext,
+                              region.key,
+                              region.value,
+                              locked: locked,
+                            ),
+                        ],
+                      ),
+                  ],
+                ),
               ),
             ),
           );
@@ -1085,13 +1149,18 @@ class _HomeScreenState extends State<HomeScreen> {
 
   String _regionCode(VpnNode node) => node.region.trim().toUpperCase();
 
-  Widget _regionRow(BuildContext routeContext, String code, String name) {
+  Widget _regionRow(
+    BuildContext routeContext,
+    String code,
+    String name, {
+    required bool locked,
+  }) {
     final nodes = _nodes.where((node) => _regionCode(node) == code);
     final node =
         nodes.where((node) => node.connectable).firstOrNull ??
         nodes.firstOrNull;
     final selected =
-        _selectedNode != null && _regionCode(_selectedNode!) == code;
+        !locked && _selectedNode != null && _regionCode(_selectedNode!) == code;
     final available = node?.connectable == true;
     return ListTile(
       contentPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 5),
@@ -1101,13 +1170,16 @@ class _HomeScreenState extends State<HomeScreen> {
       title: Text(name),
       selected: selected,
       selectedColor: _gold,
-      onTap: node == null || (_isConnected && (selected || !available))
+      onTap:
+          locked || node == null || (_isConnected && (selected || !available))
           ? null
           : () => Navigator.of(routeContext).pop(node),
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          if (!available)
+          if (locked)
+            const Text('豪华会员可用', style: TextStyle(color: _muted))
+          else if (!available)
             Text(
               node == null ? '待发布' : '待配置',
               style: const TextStyle(color: _muted),

@@ -162,6 +162,10 @@ func loadConfig() (config, error) {
 		if err != nil {
 			return cfg, errors.New("MANAGED_VLESS_REQUIRE_LEASE must be true or false")
 		}
+		cfg.managedVLESS.trialOnly, err = strconv.ParseBool(env("MANAGED_VLESS_TRIAL_ONLY", "false"))
+		if err != nil || (cfg.managedVLESS.trialOnly && !cfg.managedVLESS.requireLease) {
+			return cfg, errors.New("MANAGED_VLESS_TRIAL_ONLY requires MANAGED_VLESS_REQUIRE_LEASE=true")
+		}
 	}
 	return cfg, nil
 }

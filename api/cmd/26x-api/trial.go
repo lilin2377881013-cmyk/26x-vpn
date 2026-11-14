@@ -1,0 +1,125 @@
+package main
+
+import (
+	"crypto/sha256"
+	"database/sql"
+	"encoding/base64"
+	"encoding/hex"
+	"errors"
+	"net/http"
+	"strings"
+)
+
+func (s *server) startTrial(w http.ResponseWriter, r *http.Request) {
+	// The managed endpoint removes the trial credential after its lease expires.
+	if !s.nodeRequiresLease() {
+		writeError(w, http.StatusServiceUnavailable, "trial_unavailable", "试用线路暂未开放")
+		return
+	}
+	var input struct {
+		Installation string `json:"installation"`
+		Platform     string `json:"platform"`
+	}
+	if decodeJSON(w, r, &input) != nil {
+		writeError(w, http.StatusBadRequest, "invalid_trial", "无效的试用请求")
+		return
+	}
+	secret, err := base64.RawURLEncoding.Strict().DecodeString(input.Installation)
+	platformOK := input.Platform == "ios" || input.Platform == "macos" || input.Platform == "windows" || input.Platform == "android"
+	if err != nil || len(secret) != 32 || !platformOK {
+		writeError(w, http.StatusBadRequest, "invalid_trial", "无效的试用请求")
+		return
+	}
+	hash := sha256.Sum256(secret)
+	ctx := r.Context()
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		trialError(w)
+		return
+	}
+	defer tx.Rollback()
+	if _, err = tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(260009, hashtext(encode($1::bytea,'hex')))`, hash[:]); err != nil {
+		trialError(w)
+		return
+	}
+	var user string
+	err = tx.QueryRowContext(ctx, `SELECT user_id::text FROM trial_accounts WHERE installation_hash=$1`, hash[:]).Scan(&user)
+	if errors.Is(err, sql.ErrNoRows) {
+		ip := "trial:" + clientIP(r, s.cfg.trustedProxies)
+		if !s.trialLimiter.allow(ip) {
+			writeError(w, http.StatusTooManyRequests, "rate_limited", "试用申请过于频繁，请稍后再试")
+			return
+		}
+		s.trialLimiter.fail(ip)
+		var healthy bool
+		if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM node_endpoints e JOIN nodes n ON n.id=e.node_id
+			WHERE e.id=$1 AND e.enabled AND e.protocol='vless_reality' AND n.status IN ('online','degraded'))`,
+			s.cfg.managedVLESS.endpoint).Scan(&healthy); err != nil || !healthy {
+			writeError(w, http.StatusServiceUnavailable, "trial_unavailable", "试用线路暂未开放")
+			return
+		}
+		raw, err := randomToken(9)
+		if err != nil {
+			trialError(w)
+			return
+		}
+		code := strings.ToUpper(hex.EncodeToString([]byte(raw)[:8]))
+		tag := strings.ToLower(code)
+		if err = tx.QueryRowContext(ctx, `INSERT INTO users(email,password_hash) VALUES ($1,'!trial') RETURNING id::text`,
+			tag+"@trial.invalid").Scan(&user); err != nil {
+			trialError(w)
+			return
+		}
+		if _, err = tx.ExecContext(ctx, `INSERT INTO trial_accounts VALUES ($1,$2,$3)`, hash[:], user, code); err != nil {
+			trialError(w)
+			return
+		}
+		if _, err = tx.ExecContext(ctx, `INSERT INTO subscriptions(user_id,plan_id,status,starts_at,ends_at)
+			SELECT $1,id,'active',now(),now()+interval '15 minutes' FROM plans WHERE code='trial-15m'`, user); err != nil {
+			trialError(w)
+			return
+		}
+		if _, err = tx.ExecContext(ctx, `INSERT INTO devices(user_id,platform,label,last_seen_at) VALUES($1,$2,'试用设备',now())`, user, input.Platform); err != nil {
+			trialError(w)
+			return
+		}
+	} else if err != nil {
+		trialError(w)
+		return
+	}
+	var active bool
+	if err = tx.QueryRowContext(ctx, `SELECT status='active' FROM users WHERE id=$1`, user).Scan(&active); err != nil || !active {
+		writeError(w, http.StatusForbidden, "trial_unavailable", "此试用账号不可用")
+		return
+	}
+	if err = tx.Commit(); err != nil {
+		trialError(w)
+		return
+	}
+	s.issueSession(w, r, actor{id: user, kind: "user"})
+}
+
+func trialError(w http.ResponseWriter) {
+	writeError(w, http.StatusInternalServerError, "trial_failed", "暂时无法开启试用")
+}
+
+func (s *server) checkout(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		PlanCode string `json:"planCode"`
+	}
+	if decodeJSON(w, r, &input) != nil || input.PlanCode == "" || len(input.PlanCode) > 80 {
+		writeError(w, http.StatusBadRequest, "invalid_plan", "请选择套餐")
+		return
+	}
+	var active bool
+	if err := s.db.QueryRowContext(r.Context(), `SELECT EXISTS (SELECT 1 FROM plans
+		WHERE code=$1 AND active AND price_cents IS NOT NULL)`, input.PlanCode).Scan(&active); err != nil {
+		writeError(w, http.StatusInternalServerError, "checkout_failed", "无法读取套餐")
+		return
+	}
+	if !active {
+		writeError(w, http.StatusNotFound, "plan_unavailable", "该套餐暂不可购买")
+		return
+	}
+	writeError(w, http.StatusServiceUnavailable, "payment_unavailable", "支付暂未开放")
+}

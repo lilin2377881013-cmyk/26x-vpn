@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -42,7 +43,9 @@ class ApiClient {
   final Uri _baseUri;
   final HttpClient _http = HttpClient()
     ..connectionTimeout = const Duration(seconds: 12);
-  String get _deviceIdKey => _storageKey('26x_device_id');
+  String get _deviceIdKey => _storageKey(
+    account?.trialCode == null ? '26x_device_id' : '26x_trial_device_id',
+  );
   String get _sessionCookieKey => _storageKey('26x_session_cookie');
   String get _csrfCookieKey => _storageKey('26x_csrf_cookie');
   final FlutterSecureStorage _secureStorage = const FlutterSecureStorage(
@@ -71,6 +74,47 @@ class ApiClient {
     _captureCookies(result.cookies);
     await _persistSession();
     return loadAccount();
+  }
+
+  Future<Account> startTrial(String platform) async {
+    final key = _storageKey('26x_trial_installation');
+    var installation = await _secureStorage.read(key: key);
+    if (installation == null) {
+      final random = Random.secure();
+      installation = base64Url
+          .encode(List.generate(32, (_) => random.nextInt(256)))
+          .replaceAll('=', '');
+      await _secureStorage.write(key: key, value: installation);
+    }
+    final result = await _request(
+      'POST',
+      '/api/v1/auth/trial',
+      body: {'installation': installation, 'platform': platform},
+    );
+    if (result.statusCode != HttpStatus.created) {
+      throw ApiException(_errorMessage(result.body, '试用暂未开放'));
+    }
+    final trial = await loadAccount();
+    final registered = (await devices()).firstOrNull;
+    if (registered != null) {
+      _localDeviceId = registered.id;
+      await _secureStorage.write(key: _deviceIdKey, value: registered.id);
+    }
+    await _persistSession();
+    return trial;
+  }
+
+  Future<void> checkout(String planCode) async {
+    final result = await _request(
+      'POST',
+      '/api/v1/me/checkout',
+      csrf: true,
+      body: {'planCode': planCode},
+    );
+    throw ApiException(
+      _errorMessage(result.body, '支付暂未开放'),
+      statusCode: result.statusCode,
+    );
   }
 
   Future<bool> restoreSession() async {
@@ -103,7 +147,9 @@ class ApiClient {
     }
     final json = _decode(result.body);
     _csrfToken = json['csrfToken'] as String?;
-    account = Account.fromJson(json);
+    final next = Account.fromJson(json);
+    if (account?.id != next.id) _localDeviceId = null;
+    account = next;
     return account!;
   }
 
@@ -399,6 +445,7 @@ class ApiClient {
     _cookies.clear();
     _csrfToken = null;
     account = null;
+    _localDeviceId = null;
     await _secureStorage.delete(key: _sessionCookieKey);
     await _secureStorage.delete(key: _csrfCookieKey);
   }

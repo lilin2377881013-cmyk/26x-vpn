@@ -25,11 +25,12 @@ const sessionCookie = "26x_session"
 const csrfCookie = "26x_csrf"
 
 type server struct {
-	db        *sql.DB
-	cfg       config
-	logger    *slog.Logger
-	limiter   *loginLimiter
-	hashSlots chan struct{}
+	db           *sql.DB
+	cfg          config
+	logger       *slog.Logger
+	limiter      *loginLimiter
+	trialLimiter *loginLimiter
+	hashSlots    chan struct{}
 }
 
 type actor struct {
@@ -50,7 +51,7 @@ type loginWindow struct {
 }
 
 func newServer(db *sql.DB, cfg config, logger *slog.Logger) *server {
-	return &server{db: db, cfg: cfg, logger: logger, limiter: &loginLimiter{entries: make(map[string]loginWindow)}, hashSlots: make(chan struct{}, 4)}
+	return &server{db: db, cfg: cfg, logger: logger, limiter: &loginLimiter{entries: make(map[string]loginWindow)}, trialLimiter: &loginLimiter{entries: make(map[string]loginWindow)}, hashSlots: make(chan struct{}, 4)}
 }
 
 func (s *server) hashPassword(password string) (string, error) {
@@ -69,6 +70,8 @@ func (s *server) routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", s.health)
 	mux.HandleFunc("POST /api/v1/auth/session", s.userLogin)
+	mux.HandleFunc("POST /api/v1/auth/trial", s.startTrial)
+	mux.HandleFunc("POST /api/v1/me/checkout", s.requireUser(s.withUserCSRF(s.checkout)))
 	mux.HandleFunc("POST /api/v1/me/password", s.requireUser(s.withUserCSRF(s.changeMyPassword)))
 	mux.HandleFunc("GET /api/v1/me", s.requireUser(s.userMe))
 	mux.HandleFunc("GET /api/v1/me/plans", s.requireUser(s.listAvailablePlans))
@@ -350,7 +353,7 @@ func (s *server) adminMe(w http.ResponseWriter, r *http.Request) {
 func (s *server) userMe(w http.ResponseWriter, r *http.Request) {
 	current := actorFromContext(r)
 	var email, status string
-	var planName, planTier sql.NullString
+	var planName, planTier, trialCode sql.NullString
 	var endsAt sql.NullTime
 	err := s.db.QueryRowContext(r.Context(), `SELECT u.email::text, u.status,
 		(SELECT p.name FROM subscriptions sub JOIN plans p ON p.id = sub.plan_id
@@ -361,7 +364,8 @@ func (s *server) userMe(w http.ResponseWriter, r *http.Request) {
 		 AND (sub.ends_at IS NULL OR sub.ends_at > now()) ORDER BY sub.ends_at DESC NULLS FIRST LIMIT 1),
 		(SELECT ends_at FROM subscriptions WHERE user_id = u.id AND status = 'active' AND starts_at <= now()
 		 AND (ends_at IS NULL OR ends_at > now()) ORDER BY ends_at DESC NULLS FIRST LIMIT 1)
-		FROM users u WHERE u.id = $1`, current.id).Scan(&email, &status, &planName, &planTier, &endsAt)
+		,(SELECT code FROM trial_accounts t WHERE t.user_id=u.id)
+		FROM users u WHERE u.id = $1`, current.id).Scan(&email, &status, &planName, &planTier, &endsAt, &trialCode)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Unable to read account")
 		return
@@ -370,7 +374,7 @@ func (s *server) userMe(w http.ResponseWriter, r *http.Request) {
 	if endsAt.Valid {
 		subscriptionEnds = endsAt.Time.UTC().Format(time.RFC3339)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"id": current.id, "email": email, "status": status, "planName": nullableString(planName), "planTier": nullableString(planTier), "subscriptionEndsAt": subscriptionEnds, "csrfToken": current.csrf})
+	writeJSON(w, http.StatusOK, map[string]any{"id": current.id, "email": email, "status": status, "trialCode": nullableString(trialCode), "planName": nullableString(planName), "planTier": nullableString(planTier), "subscriptionEndsAt": subscriptionEnds, "csrfToken": current.csrf})
 }
 
 func (s *server) listAvailablePlans(w http.ResponseWriter, r *http.Request) {
@@ -608,12 +612,15 @@ func (s *server) writeClientNodes(w http.ResponseWriter, r *http.Request, rawDev
 				SELECT 1 FROM connection_leases l WHERE l.device_id = d.id AND l.expires_at > now()
 			))
 		WHERE n.status IN ('online', 'degraded')
+		AND CASE WHEN EXISTS(SELECT 1 FROM trial_accounts WHERE user_id=$2)
+			THEN e.id=$4::uuid
+			ELSE NOT $5 OR e.id<>$4::uuid END
 		AND EXISTS (
 			SELECT 1 FROM subscriptions
 			WHERE user_id = d.user_id AND status = 'active' AND starts_at <= now()
 			AND (ends_at IS NULL OR ends_at > now())
 		)
-		ORDER BY n.name, e.protocol, e.id`, deviceID, current.id, s.nodeRequiresLease())
+		ORDER BY n.name, e.protocol, e.id`, deviceID, current.id, s.nodeRequiresLease(), s.managedEndpointID(), s.cfg.managedVLESS != nil && s.cfg.managedVLESS.trialOnly)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Unable to read available nodes")
 		return
@@ -663,7 +670,13 @@ func (s *server) writeClientNodes(w http.ResponseWriter, r *http.Request, rawDev
 		writeError(w, http.StatusInternalServerError, "internal_error", "Unable to read available nodes")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": items, "credentialsProvisioned": credentialsProvisioned, "connectionLeases": true, "regionalLeases": !s.nodeRequiresLease()})
+	var trial bool
+	if err := s.db.QueryRowContext(r.Context(), `SELECT EXISTS(SELECT 1 FROM trial_accounts WHERE user_id=$1)`, current.id).Scan(&trial); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "Unable to check trial access")
+		return
+	}
+	regionalLeases := !trial && (!s.nodeRequiresLease() || s.cfg.managedVLESS.trialOnly)
+	writeJSON(w, http.StatusOK, map[string]any{"items": items, "credentialsProvisioned": credentialsProvisioned, "connectionLeases": true, "regionalLeases": regionalLeases})
 }
 
 func (s *server) adminOverview(w http.ResponseWriter, r *http.Request) {

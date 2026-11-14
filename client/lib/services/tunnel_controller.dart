@@ -1,8 +1,10 @@
 import 'dart:async';
+import 'dart:io' show Platform;
 
 import 'package:flutter/services.dart';
 
 import '../models.dart';
+import 'windows_tunnel.dart';
 import 'xray_config_builder.dart';
 
 enum TunnelState {
@@ -24,6 +26,7 @@ class TunnelController {
   static const _commands = MethodChannel('26x/tunnel');
   static const _events = EventChannel('26x/tunnel/events');
 
+  late final _windows = WindowsTunnel(onState: _readNativeState);
   final _changes = StreamController<TunnelSnapshot>.broadcast();
   StreamSubscription<dynamic>? _nativeEvents;
   TunnelSnapshot _current = const TunnelSnapshot(TunnelState.disconnected);
@@ -32,6 +35,10 @@ class TunnelController {
   TunnelSnapshot get current => _current;
 
   Future<void> initialize() async {
+    if (Platform.isWindows) {
+      _readNativeState(_windows.status);
+      return;
+    }
     try {
       _nativeEvents ??= _events.receiveBroadcastStream().listen(
         _readNativeState,
@@ -81,10 +88,12 @@ class TunnelController {
     _emit(const TunnelSnapshot(TunnelState.connecting));
     try {
       final xrayJson = XrayConfigBuilder.build(profile);
-      final response = await _commands.invokeMapMethod<String, dynamic>(
-        'connect',
-        {'nodeId': node.id, 'xrayJson': xrayJson},
-      );
+      final response = Platform.isWindows
+          ? await _windows.connect(xrayJson)
+          : await _commands.invokeMapMethod<String, dynamic>('connect', {
+              'nodeId': node.id,
+              'xrayJson': xrayJson,
+            });
       if (response?['state'] == 'connected') {
         _emit(const TunnelSnapshot(TunnelState.connected));
       } else {
@@ -124,9 +133,9 @@ class TunnelController {
   Future<void> disconnect() async {
     _emit(const TunnelSnapshot(TunnelState.disconnecting));
     try {
-      final response = await _commands.invokeMapMethod<String, dynamic>(
-        'disconnect',
-      );
+      final response = Platform.isWindows
+          ? await _windows.disconnect()
+          : await _commands.invokeMapMethod<String, dynamic>('disconnect');
       if (response != null) _readNativeState(response);
     } on MissingPluginException {
       _emit(
@@ -146,7 +155,8 @@ class TunnelController {
   }
 
   String _safeEngineMessage(String code) => switch (code) {
-    'vpn_permission_denied' => '你拒绝了系统 VPN 权限。',
+    'vpn_permission_denied' =>
+      Platform.isWindows ? '请以管理员身份运行 26x VPN。' : '你拒绝了系统 VPN 权限。',
     'profile_invalid' => '节点连接配置无效，请联系 26x 支持。',
     'engine_unavailable' => '本版本的 VPN 核心尚未安装。',
     'extension_activation_failed' => 'macOS 未能启用 26x VPN 系统扩展。',
@@ -179,6 +189,7 @@ class TunnelController {
   }
 
   Future<void> dispose() async {
+    if (Platform.isWindows) await _windows.disconnect();
     await _nativeEvents?.cancel();
     await _changes.close();
   }

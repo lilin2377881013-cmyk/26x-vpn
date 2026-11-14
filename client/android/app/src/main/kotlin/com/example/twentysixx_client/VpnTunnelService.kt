@@ -4,18 +4,21 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Intent
+import android.net.IpPrefix
 import android.net.VpnService
 import android.os.Build
 import android.os.ParcelFileDescriptor
+import libXray.DialerController
 import libXray.LibXray
+import org.json.JSONArray
 import org.json.JSONObject
+import java.net.InetAddress
 import java.util.concurrent.Executors
 
 /** Owns the Android TUN descriptor and the single libXray runtime. */
 class VpnTunnelService : VpnService() {
   private val worker = Executors.newSingleThreadExecutor()
   private var tunInterface: ParcelFileDescriptor? = null
-  private var dialerController: LibXray.DialerController? = null
 
   override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
     when (intent?.action) {
@@ -47,30 +50,64 @@ class VpnTunnelService : VpnService() {
         return
       }
 
-      val descriptor = Builder()
+      startInForeground()
+      val ping = JSONObject()
+        .put("apiVersion", 3)
+        .put("method", "pingBatch")
+        .put("payload", JSONObject()
+          .put("configs", JSONArray().put(JSONObject()
+            .put("xrayJson", rawConfig)
+            .put("outboundTag", "26x-proxy")))
+          .put("timeout", 8)
+          .put("url", "https://cp.cloudflare.com/generate_204"))
+      val checked = JSONObject(LibXray.invoke(ping.toString()))
+      if (checked.optJSONObject("data")?.optJSONArray("results")
+          ?.optJSONObject(0)?.optBoolean("success") != true) {
+        stopForegroundCompat()
+        TunnelRuntime.publish("error", "node_unreachable")
+        stopSelf(startId)
+        return
+      }
+      val excluded = assets.open("direct-ipv4-cidrs.txt").bufferedReader().use {
+        Ipv4Routes.parse(it.readText())
+      }
+      val builder = Builder()
         .setSession("26x VPN")
         .setMtu(1500)
         .addAddress("10.26.0.1", 30)
         .addAddress("fd26:26::1", 126)
-        .addRoute("0.0.0.0", 0)
         .addRoute("::", 0)
         .addDnsServer("1.1.1.1")
-        .establish() ?: throw TunnelStartException()
-      tunInterface = descriptor
-      startInForeground()
-
-      val controller = object : LibXray.DialerController {
-        override fun protectFd(fd: Int): Boolean = protect(fd)
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        builder.addRoute("0.0.0.0", 0)
+        for (network in excluded) {
+          builder.excludeRoute(IpPrefix(InetAddress.getByName(network.address), network.prefix))
+        }
+      } else {
+        for (network in Ipv4Routes.complement(excluded)) {
+          builder.addRoute(network.address, network.prefix)
+        }
       }
-      dialerController = controller
-      LibXray.registerDialerController(controller)
-      LibXray.setDNS(controller, "1.1.1.1:53")
+      val descriptor = builder.establish() ?: throw TunnelStartException()
+      tunInterface = descriptor
+
+      activeService = this
+      if (!dialerRegistered) {
+        LibXray.registerDialerController(dialerController)
+        dialerRegistered = true
+      }
+      LibXray.setDNS(dialerController, "1.1.1.1:53")
 
       val config = JSONObject(rawConfig)
+      // VpnService owns the routing table. The protected dialer handles
+      // outbound sockets without binding to a stale physical interface name.
+      val tun = config.getJSONArray("inbounds").getJSONObject(0).getJSONObject("settings")
+      tun.remove("autoOutboundsInterface")
+      tun.remove("autoSystemRoutingTable")
       val env = config.optJSONObject("env") ?: JSONObject().also {
         config.put("env", it)
       }
-      env.put("xray.tun.fd", descriptor.fd)
+      env.put("xray.tun.fd", descriptor.fd.toString())
 
       val request = JSONObject()
         .put("apiVersion", 3)
@@ -126,7 +163,7 @@ class VpnTunnelService : VpnService() {
       // Closing a TUN descriptor is best-effort during teardown.
     } finally {
       tunInterface = null
-      dialerController = null
+      if (activeService == this) activeService = null
     }
   }
 
@@ -179,6 +216,13 @@ class VpnTunnelService : VpnService() {
   }
 
   override fun onDestroy() {
+    worker.execute {
+      if (tunInterface != null) {
+        stopCoreQuietly()
+        closeTun()
+        TunnelRuntime.publish("disconnected")
+      }
+    }
     worker.shutdown()
     super.onDestroy()
   }
@@ -187,6 +231,11 @@ class VpnTunnelService : VpnService() {
   private class TunnelStopException : Exception()
 
   companion object {
+    @Volatile private var activeService: VpnTunnelService? = null
+    private var dialerRegistered = false
+    private val dialerController = object : DialerController {
+      override fun protectFd(fd: Long): Boolean = activeService?.protect(fd.toInt()) ?: true
+    }
     const val ACTION_CONNECT = "com.example.twentysixx_client.CONNECT"
     const val ACTION_DISCONNECT = "com.example.twentysixx_client.DISCONNECT"
     const val EXTRA_XRAY_JSON = "xrayJson"

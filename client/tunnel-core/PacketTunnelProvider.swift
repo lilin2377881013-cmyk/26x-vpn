@@ -34,7 +34,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
           self.queue.async {
             guard self.generation == generation else { return }
             if error != nil {
-              self.failStart(self.tunnelError(1003, "macOS 未能配置 VPN 路由。"))
+              self.failStart(self.tunnelError(1003, "系统未能配置 VPN 路由。"))
               return
             }
             do {
@@ -405,7 +405,7 @@ private final class PacketBridge {
 }
 
 /// A DNS round trip through the same packet transport used for client traffic.
-/// The response is consumed here because the query did not originate in macOS.
+/// The response is consumed here because the query did not originate in the operating system.
 private struct TunnelDNSProbe {
   static let sourceAddress = "10.26.0.1"
   static let resolverAddress = "1.1.1.1"

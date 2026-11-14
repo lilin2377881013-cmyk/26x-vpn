@@ -29,6 +29,8 @@ android {
         versionName = flutter.versionName
     }
 
+    sourceSets.getByName("main").assets.srcDir("../../tunnel-assets")
+
     buildTypes {
         release {
             // Intentionally unsigned until the owner configures a release

@@ -11,9 +11,9 @@ SOURCE_DIR="${LIBXRAY_SOURCE_DIR:-${PROJECT_ROOT}/work/libXray-${ENGINE_VERSION}
 TARGET="${1:-}"
 
 case "${TARGET}" in
-  android|apple|macos) ;;
+  android|ios|apple|macos) ;;
   *)
-    echo "Usage: $0 android|apple|macos" >&2
+    echo "Usage: $0 android|ios|apple|macos" >&2
     exit 2
     ;;
 esac
@@ -64,27 +64,37 @@ else
     echo "Full Xcode is required to build the Apple framework." >&2
     exit 1
   fi
-  if [[ "${TARGET}" == "macos" ]]; then
+  if [[ "${TARGET}" == "macos" || "${TARGET}" == "ios" ]]; then
     build_dir="$(mktemp -d "${TMPDIR:-/tmp}/26x-libxray.XXXXXXXX")"
     trap 'rm -rf "${build_dir}"' EXIT
+    bind_target=macos
+    bind_version=(-macosversion 13.0)
+    if [[ "${TARGET}" == "ios" ]]; then
+      bind_target=ios,iossimulator
+      bind_version=(-iosversion 15.0)
+    fi
     (
       cd "${SOURCE_DIR}"
       go build -mod=readonly -o "${build_dir}/gomobile" golang.org/x/mobile/cmd/gomobile
       go build -mod=readonly -o "${build_dir}/gobind" golang.org/x/mobile/cmd/gobind
       PATH="${build_dir}:${PATH}" "${build_dir}/gomobile" bind \
-        -target macos -macosversion 13.0 -o "${build_dir}/LibXray.xcframework" .
+        -target "${bind_target}" "${bind_version[@]}" -o "${build_dir}/LibXray.xcframework" .
     )
     apple_framework="${build_dir}/LibXray.xcframework"
   else
     python3 "${SOURCE_DIR}/build/main.py" apple gomobile
     apple_framework="${SOURCE_DIR}/LibXray.xcframework"
+  fi
+  if [[ "${TARGET}" != "macos" ]]; then
     mkdir -p "${CLIENT_DIR}/ios/Frameworks"
     rm -rf "${CLIENT_DIR}/ios/Frameworks/LibXray.xcframework"
     cp -R "${apple_framework}" "${CLIENT_DIR}/ios/Frameworks/LibXray.xcframework"
   fi
-  mkdir -p "${CLIENT_DIR}/macos/Frameworks"
-  rm -rf "${CLIENT_DIR}/macos/Frameworks/LibXray.xcframework"
-  cp -R "${apple_framework}" "${CLIENT_DIR}/macos/Frameworks/LibXray.xcframework"
+  if [[ "${TARGET}" != "ios" ]]; then
+    mkdir -p "${CLIENT_DIR}/macos/Frameworks"
+    rm -rf "${CLIENT_DIR}/macos/Frameworks/LibXray.xcframework"
+    cp -R "${apple_framework}" "${CLIENT_DIR}/macos/Frameworks/LibXray.xcframework"
+  fi
 fi
 
 echo "libXray ${ENGINE_VERSION} ${TARGET} artifact installed."

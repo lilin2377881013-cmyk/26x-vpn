@@ -102,14 +102,14 @@
 		78E0A7A72DC9AD7400C4905E /* FlutterGeneratedPluginSwiftPackage */ = {isa = PBXFileReference; lastKnownFileType = wrapper; name = FlutterGeneratedPluginSwiftPackage; path = ephemeral/Packages/FlutterGeneratedPluginSwiftPackage; sourceTree = "<group>"; };
 		7AFA3C8E1D35360C0083082E /* Release.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Release.xcconfig; sourceTree = "<group>"; };
 		9740EEB21CF90195004384FC /* Debug.xcconfig */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.xcconfig; path = Debug.xcconfig; sourceTree = "<group>"; };
-		A10000000000000000000010 /* PacketTunnelProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PacketTunnelProvider.swift; sourceTree = "<group>"; };
+		A10000000000000000000010 /* PacketTunnelProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = PacketTunnelProvider.swift; path = "../tunnel-core/PacketTunnelProvider.swift"; sourceTree = SOURCE_ROOT; };
 		A10000000000000000000011 /* PacketTunnelInfo.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A10000000000000000000012 /* PacketTunnel.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = PacketTunnel.entitlements; sourceTree = "<group>"; };
 		A10000000000000000000013 /* com.26xvpn.client.PacketTunnel.systemextension */ = {isa = PBXFileReference; explicitFileType = wrapper.system-extension; includeInIndex = 0; path = com.26xvpn.client.PacketTunnel.systemextension; sourceTree = BUILT_PRODUCTS_DIR; };
 		A10000000000000000000014 /* NetworkExtension.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = NetworkExtension.framework; path = System/Library/Frameworks/NetworkExtension.framework; sourceTree = SDKROOT; };
 		A10000000000000000000015 /* LibXray.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = LibXray.xcframework; path = Frameworks/LibXray.xcframework; sourceTree = SOURCE_ROOT; };
 		A10000000000000000000016 /* main.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
-		A10000000000000000000017 /* direct-ipv4-cidrs.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "direct-ipv4-cidrs.txt"; sourceTree = "<group>"; };
+		A10000000000000000000017 /* direct-ipv4-cidrs.txt */ = {isa = PBXFileReference; lastKnownFileType = text; name = "direct-ipv4-cidrs.txt"; path = "../tunnel-assets/direct-ipv4-cidrs.txt"; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */

@@ -78,7 +78,7 @@ services.
 ## IPv4 split routing
 
 The system extension uses the bundled
-[`direct-ipv4-cidrs.txt`](../../macos/PacketTunnel/direct-ipv4-cidrs.txt)
+[`direct-ipv4-cidrs.txt`](../../tunnel-assets/direct-ipv4-cidrs.txt)
 snapshot to install 5,491 IPv4 exclusions. Matching destinations use the
 underlying network interface. The provider keeps the VPN endpoint's host
 exception and sets tunnel defaults for all other IPv4 destinations and IPv6.

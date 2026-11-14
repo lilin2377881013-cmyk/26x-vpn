@@ -16,6 +16,10 @@
 		97C146FC1CF9000F007C117D /* Main.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 97C146FA1CF9000F007C117D /* Main.storyboard */; };
 		97C146FE1CF9000F007C117D /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 97C146FD1CF9000F007C117D /* Assets.xcassets */; };
 		97C147011CF9000F007C117D /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 97C146FF1CF9000F007C117D /* LaunchScreen.storyboard */; };
+		B20000000000000000000001 = {isa = PBXBuildFile; fileRef = B2000000000000000000000B; };
+		B20000000000000000000002 = {isa = PBXBuildFile; fileRef = B2000000000000000000000C; };
+		B20000000000000000000003 = {isa = PBXBuildFile; fileRef = B2000000000000000000000D; };
+		B20000000000000000000004 = {isa = PBXBuildFile; fileRef = B2000000000000000000000E; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); };};
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -26,6 +30,7 @@
 			remoteGlobalIDString = 97C146ED1CF9000F007C117D;
 			remoteInfo = Runner;
 		};
+		B20000000000000000000016 = {isa = PBXContainerItemProxy; containerPortal = 97C146E61CF9000F007C117D; proxyType = 1; remoteGlobalIDString = B20000000000000000000014; remoteInfo = PacketTunnel; };
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -39,6 +44,7 @@
 			name = "Embed Frameworks";
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		B20000000000000000000017 = {isa = PBXCopyFilesBuildPhase; buildActionMask = 2147483647; dstPath = ""; dstSubfolderSpec = 13; files = (B20000000000000000000004,); name = "Embed App Extensions"; runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
@@ -59,6 +65,10 @@
 		97C146FD1CF9000F007C117D /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		97C147001CF9000F007C117D /* Base */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; name = Base; path = Base.lproj/LaunchScreen.storyboard; sourceTree = "<group>"; };
 		97C147021CF9000F007C117D /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		B2000000000000000000000B = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = PacketTunnelProvider.swift; path = "../tunnel-core/PacketTunnelProvider.swift"; sourceTree = SOURCE_ROOT; };
+		B2000000000000000000000C = {isa = PBXFileReference; lastKnownFileType = text; name = "direct-ipv4-cidrs.txt"; path = "../tunnel-assets/direct-ipv4-cidrs.txt"; sourceTree = SOURCE_ROOT; };
+		B2000000000000000000000D = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = LibXray.xcframework; path = Frameworks/LibXray.xcframework; sourceTree = SOURCE_ROOT; };
+		B2000000000000000000000E = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = PacketTunnel.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -70,6 +80,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		B2000000000000000000001A = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (B20000000000000000000003,); runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -107,6 +118,7 @@
 			isa = PBXGroup;
 			children = (
 				97C146EE1CF9000F007C117D /* Runner.app */,
+				B2000000000000000000000E,
 				331C8081294A63A400263BE5 /* RunnerTests.xctest */,
 			);
 			name = Products;
@@ -157,11 +169,13 @@
 				97C146EB1CF9000F007C117D /* Frameworks */,
 				97C146EC1CF9000F007C117D /* Resources */,
 				9705A1C41CF9048500538489 /* Embed Frameworks */,
+				B20000000000000000000017 /* Embed App Extensions */,
 				3B06AD1E1E4923F5004D2608 /* Thin Binary */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				B20000000000000000000015,
 			);
 			name = Runner;
 			packageProductDependencies = (
@@ -170,6 +184,17 @@
 			productName = Runner;
 			productReference = 97C146EE1CF9000F007C117D /* Runner.app */;
 			productType = "com.apple.product-type.application";
+		};
+		B20000000000000000000014 /* PacketTunnel */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = B2000000000000000000001E;
+			buildPhases = (B20000000000000000000018, B2000000000000000000001A, B20000000000000000000019,);
+			buildRules = ();
+			dependencies = ();
+			name = PacketTunnel;
+			productName = PacketTunnel;
+			productReference = B2000000000000000000000E;
+			productType = "com.apple.product-type.app-extension";
 		};
 /* End PBXNativeTarget section */
 
@@ -208,6 +233,7 @@
 			projectRoot = "";
 			targets = (
 				97C146ED1CF9000F007C117D /* Runner */,
+				B20000000000000000000014 /* PacketTunnel */,
 				331C8080294A63A400263BE5 /* RunnerTests */,
 			);
 		};
@@ -232,6 +258,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		B20000000000000000000019 = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (B20000000000000000000002,); runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXShellScriptBuildPhase section */
@@ -287,6 +314,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		B20000000000000000000018 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (B20000000000000000000001,); runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -295,6 +323,7 @@
 			target = 97C146ED1CF9000F007C117D /* Runner */;
 			targetProxy = 331C8085294A63A400263BE5 /* PBXContainerItemProxy */;
 		};
+		B20000000000000000000015 = {isa = PBXTargetDependency; target = B20000000000000000000014; targetProxy = B20000000000000000000016; };
 /* End PBXTargetDependency section */
 
 /* Begin PBXVariantGroup section */
@@ -383,7 +412,8 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.example.twentysixxClient;
+				CODE_SIGN_ENTITLEMENTS = Runner/VPN.entitlements;
+				PRODUCT_BUNDLE_IDENTIFIER = "$(VPN_APP_BUNDLE_ID)";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_OBJC_BRIDGING_HEADER = "Runner/Runner-Bridging-Header.h";
 				SWIFT_VERSION = 5.0;
@@ -564,7 +594,8 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.example.twentysixxClient;
+				CODE_SIGN_ENTITLEMENTS = Runner/VPN.entitlements;
+				PRODUCT_BUNDLE_IDENTIFIER = "$(VPN_APP_BUNDLE_ID)";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_OBJC_BRIDGING_HEADER = "Runner/Runner-Bridging-Header.h";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
@@ -586,11 +617,63 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.example.twentysixxClient;
+				CODE_SIGN_ENTITLEMENTS = Runner/VPN.entitlements;
+				PRODUCT_BUNDLE_IDENTIFIER = "$(VPN_APP_BUNDLE_ID)";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_OBJC_BRIDGING_HEADER = "Runner/Runner-Bridging-Header.h";
 				SWIFT_VERSION = 5.0;
 				VERSIONING_SYSTEM = "apple-generic";
+			};
+			name = Release;
+		};
+		B2000000000000000000001F /* Debug */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 9740EEB21CF90195004384FC;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				OTHER_LDFLAGS = ("$(inherited)", "-lresolv");
+				CODE_SIGN_ENTITLEMENTS = PacketTunnel/PacketTunnel.entitlements;
+				INFOPLIST_FILE = PacketTunnel/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "$(VPN_APP_BUNDLE_ID).PacketTunnel";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		B20000000000000000000020 /* Profile */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 7AFA3C8E1D35360C0083082E;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				OTHER_LDFLAGS = ("$(inherited)", "-lresolv");
+				CODE_SIGN_ENTITLEMENTS = PacketTunnel/PacketTunnel.entitlements;
+				INFOPLIST_FILE = PacketTunnel/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "$(VPN_APP_BUNDLE_ID).PacketTunnel";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Profile;
+		};
+		B20000000000000000000021 /* Release */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 7AFA3C8E1D35360C0083082E;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				OTHER_LDFLAGS = ("$(inherited)", "-lresolv");
+				CODE_SIGN_ENTITLEMENTS = PacketTunnel/PacketTunnel.entitlements;
+				INFOPLIST_FILE = PacketTunnel/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "$(VPN_APP_BUNDLE_ID).PacketTunnel";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Release;
 		};
@@ -627,6 +710,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
+		B2000000000000000000001E = {isa = XCConfigurationList; buildConfigurations = (B2000000000000000000001F, B20000000000000000000020, B20000000000000000000021,); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */

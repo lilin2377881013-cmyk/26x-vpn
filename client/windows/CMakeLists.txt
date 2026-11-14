@@ -106,3 +106,10 @@ install(DIRECTORY "${PROJECT_BUILD_DIR}/${FLUTTER_ASSET_DIR_NAME}"
 install(FILES "${AOT_LIBRARY}" DESTINATION "${INSTALL_BUNDLE_DATA_DIR}"
   CONFIGURATIONS Profile;Release
   COMPONENT Runtime)
+
+install(FILES
+  "${CMAKE_CURRENT_SOURCE_DIR}/runtime/26x-tunnel.exe"
+  "${CMAKE_CURRENT_SOURCE_DIR}/runtime/wintun.dll"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../tunnel-assets/direct-ipv4-cidrs.txt"
+  DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
+  COMPONENT Runtime)

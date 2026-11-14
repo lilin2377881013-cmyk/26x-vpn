@@ -1,1 +1,3 @@
 #include "Generated.xcconfig"
+
+VPN_APP_BUNDLE_ID = com.example.twentysixxClient

@@ -211,7 +211,11 @@ class ApiClient {
   Future<List<VpnNode>> loadNodes({String? deviceId}) async {
     if (deviceId == null || deviceId.isEmpty) return const [];
     final query = '?deviceId=${Uri.encodeQueryComponent(deviceId)}';
-    final result = await _request('GET', '/api/v1/client/bootstrap$query');
+    var result = await _request('GET', '/api/v1/nodes$query');
+    final legacy = result.statusCode == HttpStatus.notFound;
+    if (legacy) {
+      result = await _request('GET', '/api/v1/client/bootstrap$query');
+    }
     if (result.statusCode != HttpStatus.ok) {
       throw ApiException(
         _errorMessage(result.body, '无法读取节点列表'),
@@ -221,6 +225,30 @@ class ApiClient {
     final response = _decode(result.body);
     connectionLeases = response['connectionLeases'] == true;
     final items = response['items'] as List<dynamic>? ?? const [];
+    if (!legacy) {
+      final credentials = await _request(
+        'GET',
+        '/api/v1/devices/${Uri.encodeComponent(deviceId)}/credentials',
+      );
+      if (credentials.statusCode == HttpStatus.ok) {
+        final issued = _decode(credentials.body)['items'] as List? ?? const [];
+        final profiles = {
+          for (final item in issued.whereType<Map<String, dynamic>>())
+            item['endpointId']: item['connectionProfile'],
+        };
+        for (final node in items.whereType<Map<String, dynamic>>()) {
+          final endpoint = node['endpoint'];
+          if (endpoint is Map) {
+            node['connectionProfile'] = profiles[endpoint['id']];
+          }
+        }
+      } else if (credentials.statusCode != HttpStatus.notFound) {
+        throw ApiException(
+          _errorMessage(credentials.body, '无法读取设备凭据'),
+          statusCode: credentials.statusCode,
+        );
+      }
+    }
     return items
         .whereType<Map<String, dynamic>>()
         .map(VpnNode.fromJson)

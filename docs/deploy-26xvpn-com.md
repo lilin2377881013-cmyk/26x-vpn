@@ -19,7 +19,7 @@ External verification confirmed the apex homepage and account login return 200, 
 ## DNS and ports
 
 - `26xvpn.com` and `www.26xvpn.com` already resolve to this host; no DNS update is needed for the initial site deployment.
-- Inbound TCP 80 is open for ACME HTTP validation and redirect traffic. TCP 443 must serve the website after the certificate is issued. UDP 443 remains the separate Hysteria2 listener. TCP 8443 remains Xray.
+- Inbound TCP 80 is used for ACME HTTP validation and redirects. TCP 443 serves the website on the original host. The regional VPN nodes serve Xray on TCP 8443.
 - The current site uses same-origin `/api/*` requests. No `api.26xvpn.com` record is required.
 - VPN node hostnames and REALITY `serverName` are separate protocol settings; do not change them as part of the website deployment.
 
@@ -43,8 +43,9 @@ The project uses account/password authentication for the console. MFA is not imp
 
 The original host serves the website, admin console, API and PostgreSQL.
 The VPN data plane uses four separate VLESS + REALITY nodes in Hong Kong,
-Osaka, Singapore and Los Angeles. The original node can be kept through the
-client migration so existing sessions can reconnect during the transition.
+Osaka, Singapore and Los Angeles. The original host's `hk-01` node is disabled,
+and its Xray and Hysteria2 listeners have been stopped. The replacement Hong
+Kong node is `hk-regional-01`.
 
 Publish the new endpoints with region codes HK, JP, SG and US. Apply the
 [regional routing configuration](../deploy/xray/README.md) to their client

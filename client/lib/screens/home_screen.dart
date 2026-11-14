@@ -38,6 +38,7 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _busy = false;
   int _tab = 0;
   String _planTier = 'standard';
+  final _selectedPlanCodes = <String, String>{};
   static const _pageColor = Color(0xFF191D27);
   static const _panelColor = Color(0xFF242938);
   static const _gold = Color(0xFFF0CA87);
@@ -643,6 +644,12 @@ class _HomeScreenState extends State<HomeScreen> {
     final premium = _planTier == 'premium';
     final plans = _plans.where((plan) => plan.tier == _planTier).toList()
       ..sort((a, b) => a.durationDays.compareTo(b.durationDays));
+    final selectedPlan =
+        plans
+            .where((plan) => plan.code == _selectedPlanCodes[_planTier])
+            .firstOrNull ??
+        plans.where((plan) => plan.durationDays == 90).firstOrNull ??
+        plans.firstOrNull;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -742,54 +749,87 @@ class _HomeScreenState extends State<HomeScreen> {
                 runSpacing: 12,
                 children: [
                   for (final plan in plans)
-                    Container(
+                    SizedBox(
                       width: width,
-                      padding: const EdgeInsets.symmetric(
-                        vertical: 24,
-                        horizontal: 8,
-                      ),
-                      decoration: BoxDecoration(
-                        color: _panelColor,
-                        borderRadius: BorderRadius.circular(16),
-                      ),
-                      child: Column(
-                        children: [
-                          Text(
-                            '${plan.durationDays} 天',
-                            style: const TextStyle(color: _muted),
-                          ),
-                          const SizedBox(height: 12),
-                          FittedBox(
-                            child: Text(
-                              _priceLabel(plan),
-                              style: const TextStyle(
-                                color: _gold,
-                                fontSize: 30,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(height: 10),
-                          Text(
-                            _quotaLabel(plan),
-                            style: const TextStyle(color: _muted, fontSize: 12),
-                          ),
-                          const SizedBox(height: 8),
-                          TextButton(
-                            onPressed: _busy ? null : () => _checkout(plan),
-                            child: const Text('购买'),
-                          ),
-                        ],
+                      child: _planOption(
+                        plan,
+                        selected: plan.code == selectedPlan?.code,
                       ),
                     ),
                 ],
               );
             },
           ),
+        if (selectedPlan != null && _planError == null) ...[
+          const SizedBox(height: 32),
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton(
+              onPressed: _busy ? null : () => _checkout(selectedPlan),
+              style: FilledButton.styleFrom(
+                backgroundColor: _gold,
+                foregroundColor: const Color(0xFF292115),
+                minimumSize: const Size.fromHeight(54),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+              ),
+              child: Text(_busy ? '请稍候…' : '开通会员'),
+            ),
+          ),
+        ],
         const SizedBox(height: 16),
       ],
     );
   }
+
+  Widget _planOption(VpnPlan plan, {required bool selected}) => Semantics(
+    selected: selected,
+    button: true,
+    child: Material(
+      color: _panelColor,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(
+          color: selected ? _gold : Colors.transparent,
+          width: 1.5,
+        ),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: _busy
+            ? null
+            : () => setState(() => _selectedPlanCodes[plan.tier] = plan.code),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 8),
+          child: Column(
+            children: [
+              Text(
+                '${plan.durationDays} 天',
+                style: const TextStyle(color: _muted),
+              ),
+              const SizedBox(height: 12),
+              FittedBox(
+                child: Text(
+                  _priceLabel(plan),
+                  style: const TextStyle(
+                    color: _gold,
+                    fontSize: 30,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 10),
+              Text(
+                _quotaLabel(plan),
+                style: const TextStyle(color: _muted, fontSize: 12),
+              ),
+            ],
+          ),
+        ),
+      ),
+    ),
+  );
 
   Widget _benefit(String label, {IconData? icon, String? value}) => Column(
     children: [

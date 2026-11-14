@@ -119,7 +119,18 @@ class _HomeScreenState extends State<HomeScreen> {
     _selectedNode =
         (previous == null
             ? null
-            : _nodes.where(previous.matchesEndpoint).firstOrNull) ??
+            : _nodes
+                      .where(
+                        (node) =>
+                            _regionCode(node) == _regionCode(previous) &&
+                            node.connectable,
+                      )
+                      .firstOrNull ??
+                  _nodes
+                      .where(
+                        (node) => _regionCode(node) == _regionCode(previous),
+                      )
+                      .firstOrNull) ??
         _nodes.where((node) => node.connectable).firstOrNull ??
         _nodes.firstOrNull;
     if (mounted) setState(() {});
@@ -661,7 +672,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                   const Spacer(),
                   Text(
-                    '${_nodes.length}',
+                    '${_nodes.map(_regionCode).toSet().length}',
                     style: const TextStyle(color: Color(0xFF718188)),
                   ),
                 ],
@@ -987,7 +998,11 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           const SizedBox(height: 8),
           Text(
-            _tunnelState.message ?? (_selectedNode?.name ?? '选择一个可用节点'),
+            _tunnelState.message ??
+                (_selectedNode == null
+                    ? '选择一个可用节点'
+                    : (_nodeRegions[_regionCode(_selectedNode!)] ??
+                          _selectedNode!.name)),
             textAlign: TextAlign.center,
             style: const TextStyle(color: Color(0xFF9AAEB2), fontSize: 13),
           ),
@@ -1036,25 +1051,22 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  String _regionCode(VpnNode node) => node.region.trim().toUpperCase();
+
   Widget _nodeRegion(String name, Iterable<VpnNode> nodes) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(name, style: const TextStyle(fontWeight: FontWeight.w700)),
-          const SizedBox(height: 6),
-          if (nodes.isEmpty)
-            const Text('待发布', style: TextStyle(color: Color(0xFF718188)))
-          else
-            ...nodes.map(_nodeTile),
-        ],
-      ),
-    );
+    final node =
+        nodes.where((node) => node.connectable).firstOrNull ??
+        nodes.firstOrNull;
+    if (node == null) {
+      return ListTile(title: Text(name), trailing: const Text('待发布'));
+    }
+    return _nodeTile(node, name: name);
   }
 
-  Widget _nodeTile(VpnNode node) {
-    final selected = _selectedNode?.matchesEndpoint(node) ?? false;
+  Widget _nodeTile(VpnNode node, {String? name}) {
+    final selected =
+        _selectedNode != null &&
+        _regionCode(_selectedNode!) == _regionCode(node);
     return Padding(
       padding: const EdgeInsets.only(bottom: 9),
       child: InkWell(
@@ -1082,16 +1094,8 @@ class _HomeScreenState extends State<HomeScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      node.name,
+                      name ?? node.name,
                       style: const TextStyle(fontWeight: FontWeight.w700),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      '${node.region.toUpperCase()} · ${node.protocol} · ${node.transport.toUpperCase()} ${node.port}',
-                      style: const TextStyle(
-                        color: Color(0xFF718188),
-                        fontSize: 11,
-                      ),
                     ),
                   ],
                 ),
@@ -1131,7 +1135,21 @@ class _HomeScreenState extends State<HomeScreen> {
     setState(() => _busy = true);
     try {
       await _loadNodes();
-      var node = _nodes.where(requested.matchesEndpoint).firstOrNull;
+      final region = _regionCode(requested);
+      final regional =
+          widget.api.regionalLeases && _nodeRegions.containsKey(region);
+      VpnNode? selectedEndpoint(String? endpointId) {
+        if (endpointId != null) {
+          return _nodes
+              .where((node) => node.endpointId == endpointId)
+              .firstOrNull;
+        }
+        final candidates = _nodes.where((node) => _regionCode(node) == region);
+        return candidates.where((node) => node.connectable).firstOrNull ??
+            candidates.firstOrNull;
+      }
+
+      var node = selectedEndpoint(null);
       if (!mounted) return;
       final requiresLease = widget.api.connectionLeases;
       if (node == null || (!requiresLease && !node.connectable)) {
@@ -1141,19 +1159,29 @@ class _HomeScreenState extends State<HomeScreen> {
       if (requiresLease) {
         await (_releaseInFlight ?? Future<void>.value());
         final clock = Stopwatch()..start();
-        final lease = await widget.api.reserveConnection(device.id);
+        final lease = await widget.api.reserveConnection(
+          device.id,
+          region: regional ? region : null,
+        );
         if (!mounted) {
           await widget.api.releaseConnection(lease);
           return;
         }
         _leaseInvalid = false;
         _trackLease(lease, clock.elapsed);
-        for (var attempt = 0; attempt < 12 && !node!.connectable; attempt++) {
+        if (regional && lease.endpointId == null) {
+          throw StateError('服务器未分配连接线路，请重试');
+        }
+        node = selectedEndpoint(lease.endpointId);
+        for (
+          var attempt = 0;
+          attempt < 12 && node?.connectable != true;
+          attempt++
+        ) {
           await Future<void>.delayed(const Duration(seconds: 1));
           if (!mounted || _lease == null || _leaseInvalid) break;
           await _loadNodes();
-          node = _nodes.where(requested.matchesEndpoint).firstOrNull;
-          if (node == null) break;
+          node = selectedEndpoint(lease.endpointId);
         }
         if (!mounted ||
             _lease == null ||

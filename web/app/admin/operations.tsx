@@ -75,7 +75,7 @@ export function NodeList() {
   const { data, error } = useData<{ nodes: Node[] }>("/nodes");
   return <Page title="节点列表" action={<Link className="primary-action" href="/admin/nodes/new">添加节点</Link>}>
     {error ? <ErrorMessage message={error} /> : !data ? <p>正在加载节点…</p> : <div className={styles.card}>
-      <table><thead><tr><th>节点</th><th>地区</th><th>状态</th><th>用户数</th><th>容量</th><th>最近检查</th></tr></thead>
+      <table><thead><tr><th>节点</th><th>地区</th><th>状态</th><th>用户数</th><th>在线用户上限</th><th>最近检查</th></tr></thead>
         <tbody>{(data.nodes ?? []).map((node) => <tr key={node.code}>
           <td><Link href={`/admin/nodes/${encodeURIComponent(node.code)}`}>{node.name}</Link><small>{node.code}</small></td>
           <td>{node.region_code}</td><td>{node.status}</td><td>{node.users ?? "—"}</td><td>{node.capacity_limit ?? "—"}</td>
@@ -117,7 +117,7 @@ function NodeForm({ node, submit }: { node?: Node; submit: (body: object) => Pro
       {!node && <label>节点代码<input name="code" placeholder="jp-02" pattern={"[a-zA-Z0-9][a-zA-Z0-9\\-]{1,47}"} required /></label>}
       <label>名称<input name="name" defaultValue={node?.name} maxLength={80} required /></label>
       <label>地区<select name="region_code" defaultValue={node?.region_code ?? "HK"}>{regions.map(([code, label]) => <option key={code} value={code}>{label}</option>)}</select></label>
-      <label>容量上限<input name="capacity_limit" type="number" min={1} defaultValue={node?.capacity_limit ?? undefined} /></label>
+      <label>同时在线用户上限<input name="capacity_limit" type="number" min={1} defaultValue={node?.capacity_limit ?? undefined} /></label>
       {!node && <>
         <label>服务器地址<input name="host" placeholder="1.2.3.4" required /></label>
         <label>VPN 端口<input name="port" type="number" defaultValue={8443} min={1} max={65535} required /></label>

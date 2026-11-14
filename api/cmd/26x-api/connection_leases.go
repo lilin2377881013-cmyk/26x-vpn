@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -13,10 +14,18 @@ const connectionLeaseLifetime = 90 * time.Second
 func (s *server) acquireConnectionLease(w http.ResponseWriter, r *http.Request) {
 	device := r.PathValue("id")
 	var input struct {
-		Token string `json:"token"`
+		Token  string `json:"token"`
+		Region string `json:"region"`
 	}
 	if !uuidPattern.MatchString(device) || decodeJSON(w, r, &input) != nil || len(input.Token) > 128 {
 		writeError(w, http.StatusBadRequest, "invalid_connection_lease", "Provide a valid device and connection token")
+		return
+	}
+	input.Region = strings.ToUpper(strings.TrimSpace(input.Region))
+	switch input.Region {
+	case "", "HK", "JP", "SG", "US":
+	default:
+		writeError(w, http.StatusBadRequest, "invalid_region", "Select a supported region")
 		return
 	}
 	ctx, user := r.Context(), actorFromContext(r)
@@ -67,18 +76,29 @@ func (s *server) acquireConnectionLease(w http.ResponseWriter, r *http.Request) 
 
 	var token = input.Token
 	var expires time.Time
+	var endpoint sql.NullString
 	if token != "" {
+		if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(260008, hashtext(UPPER(n.region_code)))
+			FROM connection_leases l JOIN node_endpoints e ON e.id=l.endpoint_id
+			JOIN nodes n ON n.id=e.node_id WHERE l.device_id=$1 AND l.user_id=$2`, device, user.id); err != nil {
+			connectionLeaseError(w)
+			return
+		}
 		hash := sha256.Sum256([]byte(token))
 		err = tx.QueryRowContext(ctx, `UPDATE connection_leases
-			SET expires_at = now() + ($4 * interval '1 second')
-			WHERE device_id = $1 AND user_id = $2 AND token_hash = $3 AND expires_at > now()
+			SET expires_at = clock_timestamp() + ($4 * interval '1 second')
+			WHERE device_id = $1 AND user_id = $2 AND token_hash = $3 AND expires_at > clock_timestamp()
 			AND device_id IN (
 				SELECT l.device_id FROM connection_leases l
 				JOIN devices d ON d.id = l.device_id AND d.revoked_at IS NULL
 				WHERE l.user_id = $2 AND l.expires_at > now()
 				ORDER BY l.acquired_at, l.device_id LIMIT $5
 			)
-			RETURNING expires_at`, device, user.id, hash[:], int(connectionLeaseLifetime.Seconds()), limit).Scan(&expires)
+			AND (endpoint_id IS NULL OR EXISTS (
+				SELECT 1 FROM node_endpoints e JOIN nodes n ON n.id=e.node_id
+				WHERE e.id=connection_leases.endpoint_id AND e.enabled AND n.status IN ('online','degraded')
+			))
+			RETURNING expires_at, endpoint_id::text`, device, user.id, hash[:], int(connectionLeaseLifetime.Seconds()), limit).Scan(&expires, &endpoint)
 		if errors.Is(err, sql.ErrNoRows) {
 			writeError(w, http.StatusConflict, "connection_lease_expired", "Reconnect to renew VPN access")
 			return
@@ -119,18 +139,47 @@ func (s *server) acquireConnectionLease(w http.ResponseWriter, r *http.Request) 
 			writeError(w, http.StatusConflict, "connection_releasing", "The previous connection is still closing")
 			return
 		}
+		if input.Region != "" {
+			if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(260008, hashtext($1))`, input.Region); err != nil {
+				connectionLeaseError(w)
+				return
+			}
+			err = tx.QueryRowContext(ctx, `SELECT e.id::text
+				FROM nodes n JOIN node_endpoints e ON e.node_id=n.id AND e.enabled
+				JOIN device_node_credentials c ON c.endpoint_id=e.id AND c.device_id=$1
+					AND c.status='active' AND c.revoked_at IS NULL
+				CROSS JOIN LATERAL (
+					SELECT count(DISTINCT l.user_id) AS seats,
+						COALESCE(bool_or(l.user_id = $3), false) AS has_user
+					FROM connection_leases l
+					JOIN node_endpoints le ON le.id=l.endpoint_id
+					WHERE le.node_id=n.id AND l.expires_at > clock_timestamp()
+				) load
+				WHERE UPPER(n.region_code)=$2 AND n.status IN ('online','degraded')
+					AND (load.has_user OR n.capacity_limit IS NULL OR load.seats < n.capacity_limit)
+				ORDER BY CASE WHEN n.status='online' THEN 0 ELSE 1 END,
+					load.has_user DESC, load.seats, n.code, e.id LIMIT 1`, device, input.Region, user.id).Scan(&endpoint)
+			if errors.Is(err, sql.ErrNoRows) {
+				writeError(w, http.StatusConflict, "region_unavailable", "No server in this region has space and an active device credential")
+				return
+			}
+			if err != nil {
+				connectionLeaseError(w)
+				return
+			}
+		}
 		token, err = randomToken(32)
 		if err != nil {
 			connectionLeaseError(w)
 			return
 		}
 		hash := sha256.Sum256([]byte(token))
-		err = tx.QueryRowContext(ctx, `INSERT INTO connection_leases (device_id,user_id,token_hash,expires_at)
-			VALUES ($1,$2,$3,now()+($4 * interval '1 second'))
+		err = tx.QueryRowContext(ctx, `INSERT INTO connection_leases (device_id,user_id,token_hash,expires_at,endpoint_id)
+			VALUES ($1,$2,$3,clock_timestamp()+($4 * interval '1 second'),$5)
 			ON CONFLICT (device_id) DO UPDATE SET token_hash=EXCLUDED.token_hash,
-				expires_at=EXCLUDED.expires_at, acquired_at=now()
-			WHERE connection_leases.expires_at <= now()
-			RETURNING expires_at`, device, user.id, hash[:], int(connectionLeaseLifetime.Seconds())).Scan(&expires)
+				expires_at=EXCLUDED.expires_at, acquired_at=now(), endpoint_id=EXCLUDED.endpoint_id
+			WHERE connection_leases.expires_at <= clock_timestamp()
+			RETURNING expires_at`, device, user.id, hash[:], int(connectionLeaseLifetime.Seconds()), endpoint).Scan(&expires)
 		if errors.Is(err, sql.ErrNoRows) {
 			writeError(w, http.StatusConflict, "device_already_connected", "This device already holds a connection")
 			return
@@ -147,6 +196,7 @@ func (s *server) acquireConnectionLease(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"token": token, "expiresAt": expires.UTC().Format(time.RFC3339),
 		"validForSeconds": int(connectionLeaseLifetime.Seconds()),
+		"endpointId":      nullableString(endpoint),
 	})
 }
 

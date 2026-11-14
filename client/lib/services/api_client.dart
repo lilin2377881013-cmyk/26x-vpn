@@ -16,11 +16,17 @@ class ApiException implements Exception {
 }
 
 class ConnectionLease {
-  const ConnectionLease(this.deviceId, this.token, this.validFor);
+  const ConnectionLease(
+    this.deviceId,
+    this.token,
+    this.validFor, {
+    this.endpointId,
+  });
 
   final String deviceId;
   final String token;
   final Duration validFor;
+  final String? endpointId;
 }
 
 class ApiClient {
@@ -208,6 +214,8 @@ class ApiClient {
     }
   }
 
+  bool regionalLeases = false;
+
   Future<List<VpnNode>> loadNodes({String? deviceId}) async {
     if (deviceId == null || deviceId.isEmpty) return const [];
     final query = '?deviceId=${Uri.encodeQueryComponent(deviceId)}';
@@ -224,6 +232,7 @@ class ApiClient {
     }
     final response = _decode(result.body);
     connectionLeases = response['connectionLeases'] == true;
+    regionalLeases = response['regionalLeases'] == true;
     final items = response['items'] as List<dynamic>? ?? const [];
     if (!legacy) {
       final credentials = await _request(
@@ -258,12 +267,13 @@ class ApiClient {
   Future<ConnectionLease> reserveConnection(
     String deviceId, {
     String? token,
+    String? region,
   }) async {
     final result = await _request(
       'PUT',
       '/api/v1/me/devices/${Uri.encodeComponent(deviceId)}/connection-lease',
       csrf: true,
-      body: {'token': ?token},
+      body: {'token': ?token, 'region': ?region},
     );
     if (result.statusCode != HttpStatus.ok) {
       final error = _decode(result.body)['error'];
@@ -273,6 +283,7 @@ class ApiClient {
         'device_already_connected' => '本机仍占用一个连接名额，请稍后重试。',
         'connection_lease_expired' => '连接名额已失效，请重新连接。',
         'connection_releasing' => '上次连接正在关闭，请稍后重试。',
+        'region_unavailable' => '该地区当前没有可分配服务器，请稍后重试或选择其他地区。',
         _ => '暂时无法确认 VPN 连接名额。',
       }, statusCode: result.statusCode);
     }
@@ -282,7 +293,12 @@ class ApiClient {
     if (issued is! String || issued.isEmpty || seconds is! int || seconds < 1) {
       throw const ApiException('服务器返回的连接名额无效。');
     }
-    return ConnectionLease(deviceId, issued, Duration(seconds: seconds));
+    return ConnectionLease(
+      deviceId,
+      issued,
+      Duration(seconds: seconds),
+      endpointId: json['endpointId'] as String?,
+    );
   }
 
   Future<void> releaseConnection(ConnectionLease lease) async {

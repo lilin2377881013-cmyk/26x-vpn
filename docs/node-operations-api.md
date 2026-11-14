@@ -66,9 +66,25 @@ Migration 007 adds `nodes.ssh_port`, `nodes.ssh_user` and
 totals per UTC day and upsert by `(node_id, usage_day)`. User and device
 totals use the existing `usage_daily` with `(device_id, usage_day)`.
 Entries returned in `daily` contain `day`, `bytes_up` and `bytes_down`.
-An absent day means no sample was stored. Node capacity counts users or
-devices according to the operator's deployment sizing and is separate from
-a bandwidth quota.
+An absent day means no sample was stored.
+
+Migration 008 records the selected endpoint on each regional connection
+lease. The client shows one entry per supported region. On connect it sends
+`region` with the lease request, and the API returns `endpointId`. The API
+selects an enabled endpoint with an active credential for that device,
+prefers healthy servers, and allocates capacity transactionally. Each
+physical server's `capacity_limit` counts distinct accounts with live
+leases across its endpoints. Two devices from one account on the same
+server use one seat. A blank limit is unlimited. Renewal keeps the same
+endpoint. If the pool is full, the user can retry after a seat frees up.
+
+Add a physical server using a unique code and the same region code to grow
+the pool. Provision device credentials for that server before routing
+devices to it. Older clients without regional leases do not use this
+allocator. Deployments using the legacy managed endpoint that provisions
+credentials after a lease continue to use the old path. Lease capacity is an API limit; enforcement for direct
+connections with cached credentials depends on server-side provisioning
+and revocation.
 
 ## Client endpoints and credentials
 

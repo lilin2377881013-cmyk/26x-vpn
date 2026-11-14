@@ -663,7 +663,7 @@ func (s *server) writeClientNodes(w http.ResponseWriter, r *http.Request, rawDev
 		writeError(w, http.StatusInternalServerError, "internal_error", "Unable to read available nodes")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": items, "credentialsProvisioned": credentialsProvisioned, "connectionLeases": true})
+	writeJSON(w, http.StatusOK, map[string]any{"items": items, "credentialsProvisioned": credentialsProvisioned, "connectionLeases": true, "regionalLeases": !s.nodeRequiresLease()})
 }
 
 func (s *server) adminOverview(w http.ResponseWriter, r *http.Request) {

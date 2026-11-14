@@ -1,8 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { FormEvent, ReactNode, useEffect, useState } from "react";
+import { AdminNav } from "./admin-nav";
 import styles from "./operations.module.css";
 
 type Node = {
@@ -55,12 +56,19 @@ function useData<T>(path: string): { data?: T; error?: string } {
 }
 
 function Page({ title, action, children }: { title: string; action?: ReactNode; children: ReactNode }) {
-  return <main className={styles.page}>
-    <nav className={styles.nav} aria-label="后台导航">
-      <Link href="/admin">管理概览</Link><Link href="/admin/nodes">节点</Link><Link href="/admin/users">用户</Link><Link href="/admin/support">客服留言</Link>
-    </nav>
-    <header className={styles.heading}><h1>{title}</h1>{action}</header>
-    {children}
+  const pathname = usePathname();
+  return <main className="admin-shell">
+    <AdminNav current={pathname} />
+    <section className="admin-content">
+      <header className="admin-topbar">
+        <div><Link className="breadcrumb" href="/admin">26x 管理后台</Link> / {title}</div>
+        <Link className="admin-help" href="/">访问官网 ↗</Link>
+      </header>
+      <div className={styles.page}>
+        <header className={styles.heading}><h1>{title}</h1>{action}</header>
+        {children}
+      </div>
+    </section>
   </main>;
 }
 

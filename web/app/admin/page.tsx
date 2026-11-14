@@ -1,8 +1,9 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { FormEvent, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { AdminNav } from "./admin-nav";
+import { useRouter, useSearchParams } from "next/navigation";
 
 type Tab = "概览" | "用户" | "设备" | "节点" | "套餐" | "审计记录";
 type UserRow = { id: string; email: string; status: string; activeDevices: number; planName: string | null; subscriptionEndsAt: string | null };
@@ -45,8 +46,14 @@ const demoAudit: AuditRow[] = [
 ];
 
 export default function AdminPage() {
+  return <Suspense fallback={<main className="admin-loading">正在加载后台…</main>}><AdminDashboard /></Suspense>;
+}
+
+function AdminDashboard() {
   const router = useRouter();
-  const [active, setActive] = useState<Tab>("概览");
+  const selected = useSearchParams().get("tab");
+  const active = tabs.find((tab) => tab === selected) ?? "概览";
+  const setActive = (tab: Tab) => router.push(tab === "概览" ? "/admin" : "/admin?tab=" + encodeURIComponent(tab));
   const [query, setQuery] = useState("");
   const [overview, setOverview] = useState<Overview | null>(isDemo ? demoOverview : null);
   const [users, setUsers] = useState<UserRow[]>(isDemo ? demoUsers : []);
@@ -222,24 +229,20 @@ export default function AdminPage() {
 
   return (
     <main className="admin-shell">
-      <aside className="admin-sidebar">
-        <Link className="brand admin-brand" href="/"><span className="brand-mark">26</span><span className="brand-x">x</span><small>CONTROL</small></Link>
-        <div className="sidebar-label">WORKSPACE</div>
-        <nav aria-label="后台导航">{!isDemo && <><Link className="admin-nav" href="/admin/nodes">节点管理</Link><Link className="admin-nav" href="/admin/users">用户流量</Link><Link className="admin-nav" href="/admin/support">客服留言</Link></>}{tabs.map((tab, index) => <button className={active === tab ? "admin-nav active" : "admin-nav"} key={tab} onClick={() => setActive(tab)}><span>{["◫", "♙", "▣", "⌁", "◇", "≡"][index]}</span>{tab}{tab === "节点" && <i className="nav-indicator" />}</button>)}</nav>
-        <div className="sidebar-bottom"><div className="admin-avatar">26</div><div><strong>{operator}</strong><small>{isDemo ? "开发演示账户" : "26x 管理员"}</small></div><button onClick={logout} aria-label="退出登录">↗</button></div>
-      </aside>
+      <AdminNav demo={isDemo} current={active === "概览" ? "/admin" : "/admin?tab=" + active}
+        footer={<><div className="admin-avatar">26</div><div><strong>{operator}</strong><small>{isDemo ? "开发演示账户" : "26x 管理员"}</small></div><button onClick={logout}>退出</button></>} />
 
       <section className="admin-content">
         <header className="admin-topbar"><div><span className="breadcrumb">26x Control /</span> {active}</div><div className="topbar-tools"><span className="env-pill"><i /> {isDemo ? "DEVELOPMENT DEMO" : "LIVE DATA"}</span><button className="icon-button" aria-label="刷新数据" onClick={() => void refresh()}>↻</button><a className="admin-help" href="/support">帮助中心 ↗</a></div></header>
         <div className="admin-page">
-          <div className="admin-heading"><div><div className="eyebrow">26x CONTROL PLANE</div><h1>{active === "概览" ? "运营概览" : active}</h1><p>查看 26x 服务的用户、设备、节点与运营状态。</p></div>{["用户", "节点", "套餐"].includes(active) && <button className="primary-action" onClick={() => setDialog(active === "节点" ? "node" : active === "套餐" ? "plan" : "user")}>＋ {active === "节点" ? "新建节点" : active === "套餐" ? "新建套餐" : "新建用户"}</button>}</div>
+          <div className="admin-heading"><div><div className="eyebrow">26x CONTROL PLANE</div><h1>{active === "概览" ? "运营概览" : active}</h1>{active === "概览" && <p>查看用户、设备、订阅与节点状态。</p>}</div>{["用户", "节点"].includes(active) && <button className="primary-action" onClick={() => setDialog(active === "节点" ? "node" : active === "套餐" ? "plan" : "user")}>＋ {active === "节点" ? "新建节点" : active === "套餐" ? "新建套餐" : "新建用户"}</button>}</div>
           {isDemo && <div className="demo-banner"><span className="demo-banner-icon">i</span><span><strong>开发演示数据</strong>　此页面使用本地演示数据，写入操作不会保存。</span><Link href="/">查看 26x 官网 ↗</Link></div>}
           {error && <div className="console-error" role="alert"><span>{error}</span><button onClick={() => void refresh()}>重新载入</button></div>}
           {notice && <div className="console-notice" role="status"><span>{notice}</span><button onClick={() => setNotice("")}>×</button></div>}
 
           {active === "概览" && <>
             <div className="metric-grid"><Metric title="活跃用户" value={overview?.activeUsers ?? "—"} foot="账号状态为 active" glyph="♙" /><Metric title="已登记设备" value={overview?.activeDevices ?? "—"} foot="未撤销设备" glyph="▣" /><Metric title="在线节点" value={`${overview?.onlineNodes ?? "—"} / ${nodes.length}`} foot="最近健康检查状态" glyph="⌁" /><Metric title="有效订阅" value={overview?.activeSubscriptions ?? "—"} foot="当前有效的服务权限" glyph="◇" /></div>
-            <div className="admin-columns"><section className="panel"><PanelHeading title="节点健康" subtitle={overview?.asOf ? `更新于 ${formatTime(overview.asOf)}` : "节点运行状态"} action={<button className="subtle-button" onClick={() => void refresh()}>刷新状态 ↻</button>} /><NodeTable nodes={nodes.slice(0, 3)} /></section><section className="panel activity-panel"><PanelHeading title="最近操作" subtitle="管理后台审计记录" action={<button className="icon-button" onClick={() => setActive("审计记录")} aria-label="查看记录">···</button>} />{audit.slice(0, 3).map((item) => <div className="activity-item" key={item.id}><span className="activity-mark">↗</span><div><strong>{actionLabel(item.action)}</strong><small>{item.actor} · {item.targetId} · {formatTime(item.createdAt)}</small></div></div>)}{audit.length === 0 && <p className="empty-hint">暂时没有审计记录。</p>}<button className="view-all" onClick={() => setActive("审计记录")}>查看全部记录 <span>→</span></button></section></div>
+            <div className="admin-columns"><section className="panel"><PanelHeading title="节点健康" subtitle={overview?.asOf ? `更新于 ${formatTime(overview.asOf)}` : "节点运行状态"} action={isDemo ? undefined : <Link className="subtle-button" href="/admin/nodes">管理节点 →</Link>} /><NodeTable nodes={nodes} /></section><section className="panel activity-panel"><PanelHeading title="最近操作" subtitle="管理后台审计记录" action={<button className="icon-button" onClick={() => setActive("审计记录")} aria-label="查看记录">···</button>} />{audit.slice(0, 3).map((item) => <div className="activity-item" key={item.id}><span className="activity-mark">↗</span><div><strong>{actionLabel(item.action)}</strong><small>{item.actor} · {item.targetId} · {formatTime(item.createdAt)}</small></div></div>)}{audit.length === 0 && <p className="empty-hint">暂时没有审计记录。</p>}<button className="view-all" onClick={() => setActive("审计记录")}>查看全部记录 <span>→</span></button></section></div>
             <section className="panel users-panel"><PanelHeading title="最近用户" subtitle={`${users.length} 个账户`} action={<div className="panel-actions"><SearchBox query={query} setQuery={setQuery} /><button className="subtle-button" onClick={() => setActive("用户")}>全部用户 →</button></div>} /><UserTable rows={filteredUsers.slice(0, 5)} onChangeStatus={changeUserStatus} onAssignPlan={(user) => { setSubscriptionUser(user); setDialog("subscription"); }} /></section>
           </>}
 

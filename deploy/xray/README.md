@@ -47,23 +47,38 @@ slot after reconciliation confirms removal. Manually configured users
 must be migrated out of the node's static credentials to enforce the
 same limit for those users.
 
-## Hong Kong and Japan egress
+## Regional nodes and egress routing
 
-[The routing example](hk-split-routing.json.example) sends OpenAI domains from
-the managed VLESS inbound to a Japan VPS. Remaining traffic from that inbound
-uses Hong Kong's own connection. It assumes a dedicated VLESS over TLS
-listener on the Japan VPS with a valid certificate for its hostname.
+Publish actual endpoints under region codes `HK`, `JP`, `SG`, and `US`
+in the admin console. Each published endpoint needs health checks and
+per-device credentials before users can connect. The Flutter client groups
+the endpoints by region and shows any region without an endpoint as pending.
+The current automatic credential reconciler manages one endpoint. Assign
+device credentials for additional endpoints through the admin console until
+multi-node reconciliation is available.
 
-Replace the example address, port, TLS name and UUID with the Japan listener's
-actual values. Keep the UUID in the deployed config. Add the two outbounds to
-the existing Hong Kong configuration. Add the two rules after any existing
-control or policy rules that must take precedence and before any general
-catch-all rule. Match the managed inbound's actual tag in both rules. Keep
-other inbounds, outbounds and API routing in place.
+Apply [the routing example](region-split-routing.json.example) to the
+managed VLESS ingress of each region. It has three ordered rules:
 
-Enable the following on the managed Hong Kong VLESS inbound so DNS-resolved
-connections can match their HTTP Host or TLS server name. Sniffing only
-supplies a domain for route selection.
+1. OpenAI domains use the Japan egress.
+2. Streaming domains in the list use the US egress.
+3. Remaining traffic from that ingress uses the selected region's local egress.
+
+The example uses dedicated VLESS over TLS relay listeners with valid
+certificates in Japan and the US. Set each relay's address, port, TLS name
+and separate UUID in the deployed config. Keep relay credentials outside
+Git. On the Japan ingress, point the OpenAI rule at `region-direct` and
+omit the `jp-openai` outbound. On the US ingress, point the streaming rule
+at `region-direct` and omit the `us-streaming` outbound. Relay listeners
+should use separate inbound tags and send their relayed traffic out locally.
+
+Add the applicable outbounds to the existing configuration. Place the
+three rules after any control or policy rules that must take precedence
+and before a general catch-all rule. Match the actual client inbound tag
+in each rule. Preserve existing API routes and outbounds.
+
+Enable sniffing on the client ingress so DNS-resolved traffic can match
+the HTTP Host, TLS server name, or QUIC server name visible to Xray.
 
 ```json
 "sniffing": {
@@ -73,12 +88,16 @@ supplies a domain for route selection.
 }
 ```
 
-Run `xray run -test -config /path/to/merged.json` before restarting. Then
-compare the IP reported by the ChatGPT or OpenAI trace endpoint with the
-IP reported by a neutral IP-check service through the same client. Keep
-Japan's hostname and TLS certificate consistent. Traffic without an
-observable hostname follows the Hong Kong rule.
+The macOS IPv4 exclusions take precedence before traffic reaches Xray.
+The streaming policy covers known service and CDN domains. Add new domains
+to the US rule as needed. Traffic whose destination cannot be identified
+as streaming follows the selected region's default route. Routing a
+service through the US does not establish that its account or subscription
+has playback rights there.
 
-The example covers OpenAI-operated domains used for chat, login, API and
-content. Verify any additional service dependencies with
-[OpenAI's network guide](https://help.openai.com/en/articles/9247338-network-recommendations-for-chatgpt-errors-on-web-and-apps).
+Validate the merged configuration with
+`xray run -test -config /path/to/merged.json`. Then verify the selected
+outbound in Xray access logs and run a playback check for each streaming
+service of interest. The OpenAI rules cover chat, login, API and content
+domains. See [OpenAI's network guide](https://help.openai.com/en/articles/9247338-network-recommendations-for-chatgpt-errors-on-web-and-apps)
+for additional dependencies.

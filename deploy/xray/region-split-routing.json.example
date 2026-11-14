@@ -1,0 +1,143 @@
+{
+  "outbounds": [
+    {
+      "tag": "region-direct",
+      "protocol": "freedom"
+    },
+    {
+      "tag": "jp-openai",
+      "protocol": "vless",
+      "settings": {
+        "address": "jp-vps.example.com",
+        "port": 443,
+        "id": "00000000-0000-4000-8000-000000000000",
+        "encryption": "none"
+      },
+      "streamSettings": {
+        "network": "raw",
+        "security": "tls",
+        "tlsSettings": {
+          "serverName": "jp-vps.example.com"
+        }
+      }
+    },
+    {
+      "tag": "us-streaming",
+      "protocol": "vless",
+      "settings": {
+        "address": "us-vps.example.com",
+        "port": 443,
+        "id": "00000000-0000-4000-8000-000000000000",
+        "encryption": "none"
+      },
+      "streamSettings": {
+        "network": "raw",
+        "security": "tls",
+        "tlsSettings": {
+          "serverName": "us-vps.example.com"
+        }
+      }
+    }
+  ],
+  "routing": {
+    "domainStrategy": "AsIs",
+    "rules": [
+      {
+        "type": "field",
+        "inboundTag": [
+          "vless-26x"
+        ],
+        "domain": [
+          "domain:chatgpt.com",
+          "domain:openai.com",
+          "domain:oaistatic.com",
+          "domain:oaiusercontent.com",
+          "domain:oaistatsig.com",
+          "full:cdn.openaimerge.com"
+        ],
+        "outboundTag": "jp-openai"
+      },
+      {
+        "type": "field",
+        "inboundTag": [
+          "vless-26x"
+        ],
+        "domain": [
+          "domain:youtube.com",
+          "domain:youtu.be",
+          "domain:youtube-nocookie.com",
+          "domain:googlevideo.com",
+          "domain:ytimg.com",
+          "domain:youtubei.googleapis.com",
+          "domain:netflix.com",
+          "domain:netflix.net",
+          "domain:nflxext.com",
+          "domain:nflximg.com",
+          "domain:nflximg.net",
+          "domain:nflxso.net",
+          "domain:nflxvideo.net",
+          "domain:disneyplus.com",
+          "domain:disney-plus.net",
+          "domain:bamgrid.com",
+          "domain:dssott.com",
+          "domain:hulu.com",
+          "domain:huluim.com",
+          "domain:hulustream.com",
+          "domain:max.com",
+          "domain:hbomax.com",
+          "domain:hbomaxcdn.com",
+          "domain:hbo.com",
+          "domain:primevideo.com",
+          "domain:amazonvideo.com",
+          "domain:aiv-cdn.net",
+          "domain:aiv-delivery.net",
+          "domain:peacocktv.com",
+          "domain:paramountplus.com",
+          "domain:pplusstatic.com",
+          "domain:tv.apple.com",
+          "domain:tv.applemusic.com",
+          "domain:hls.itunes.apple.com",
+          "domain:twitch.tv",
+          "domain:twitchcdn.net",
+          "domain:ttvnw.net",
+          "domain:jtvnw.net",
+          "domain:spotify.com",
+          "domain:scdn.co",
+          "domain:spotifycdn.com",
+          "domain:spotifycdn.net",
+          "domain:soundcloud.com",
+          "domain:sndcdn.com",
+          "domain:crunchyroll.com",
+          "domain:vrv.co",
+          "domain:funimation.com",
+          "domain:pluto.tv",
+          "domain:tubitv.com",
+          "domain:tubi.tv",
+          "domain:therokuchannel.roku.com",
+          "domain:plex.tv",
+          "domain:sling.com",
+          "domain:fubo.tv",
+          "domain:fubotv.com",
+          "domain:discoveryplus.com",
+          "domain:discoveryplus.co.uk",
+          "domain:bbci.co.uk",
+          "domain:vimeo.com",
+          "domain:vimeocdn.com",
+          "domain:dailymotion.com",
+          "domain:dmcdn.net",
+          "domain:bbcmedia.co.uk",
+          "domain:iplayer.bbc.co.uk",
+          "domain:bbciplayer.com"
+        ],
+        "outboundTag": "us-streaming"
+      },
+      {
+        "type": "field",
+        "inboundTag": [
+          "vless-26x"
+        ],
+        "outboundTag": "region-direct"
+      }
+    ]
+  }
+}

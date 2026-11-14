@@ -7,6 +7,8 @@ import '../models.dart';
 import '../services/api_client.dart';
 import '../services/tunnel_controller.dart';
 
+const _nodeRegions = {'HK': '香港', 'JP': '日本', 'SG': '新加坡', 'US': '美国'};
+
 class HomeScreen extends StatefulWidget {
   const HomeScreen({required this.api, required this.tunnel, super.key});
 
@@ -654,7 +656,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   const Icon(Icons.public_rounded, color: Color(0xFF087E79)),
                   const SizedBox(width: 9),
                   const Text(
-                    '可用节点',
+                    '节点地区',
                     style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
                   ),
                   const Spacer(),
@@ -665,13 +667,21 @@ class _HomeScreenState extends State<HomeScreen> {
                 ],
               ),
               const SizedBox(height: 14),
-              if (_nodes.isEmpty)
-                const Text(
-                  '目前没有已发布的节点。节点凭据完成签发后会显示在这里。',
-                  style: TextStyle(color: Color(0xFF718188), height: 1.5),
-                )
-              else
-                ..._nodes.map(_nodeTile),
+              ..._nodeRegions.entries.map(
+                (region) => _nodeRegion(
+                  region.value,
+                  _nodes.where(
+                    (node) => node.region.trim().toUpperCase() == region.key,
+                  ),
+                ),
+              ),
+              ..._nodes
+                  .where(
+                    (node) => !_nodeRegions.containsKey(
+                      node.region.trim().toUpperCase(),
+                    ),
+                  )
+                  .map(_nodeTile),
             ],
           ),
         ),
@@ -1021,6 +1031,23 @@ class _HomeScreenState extends State<HomeScreen> {
             textAlign: TextAlign.center,
             style: TextStyle(color: Color(0xFF82949A), fontSize: 11),
           ),
+        ],
+      ),
+    );
+  }
+
+  Widget _nodeRegion(String name, Iterable<VpnNode> nodes) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(name, style: const TextStyle(fontWeight: FontWeight.w700)),
+          const SizedBox(height: 6),
+          if (nodes.isEmpty)
+            const Text('待发布', style: TextStyle(color: Color(0xFF718188)))
+          else
+            ...nodes.map(_nodeTile),
         ],
       ),
     );

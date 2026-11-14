@@ -1088,6 +1088,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final node = _selectedNode;
     final region = node == null ? null : _regionCode(node);
     final label = node == null ? '选择地区' : _nodeRegions[region] ?? node.name;
+    final isTrial = _account?.trialCode != null;
     final status = switch (_tunnelState.state) {
       TunnelState.connected => '已连接',
       TunnelState.connecting => '正在连接',
@@ -1180,6 +1181,8 @@ class _HomeScreenState extends State<HomeScreen> {
                         icon: const Icon(Icons.add_rounded),
                         label: const Text('注册本机设备'),
                       )
+                    else if (isTrial)
+                      const Text('15 分钟试用', style: TextStyle(color: muted))
                     else
                       OutlinedButton(
                         onPressed: _busy || _isConnecting ? null : _showRegions,

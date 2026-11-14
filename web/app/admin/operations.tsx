@@ -57,7 +57,7 @@ function useData<T>(path: string): { data?: T; error?: string } {
 function Page({ title, action, children }: { title: string; action?: ReactNode; children: ReactNode }) {
   return <main className={styles.page}>
     <nav className={styles.nav} aria-label="后台导航">
-      <Link href="/admin">管理概览</Link><Link href="/admin/nodes">节点</Link><Link href="/admin/users">用户</Link>
+      <Link href="/admin">管理概览</Link><Link href="/admin/nodes">节点</Link><Link href="/admin/users">用户</Link><Link href="/admin/support">客服留言</Link>
     </nav>
     <header className={styles.heading}><h1>{title}</h1>{action}</header>
     {children}
@@ -243,5 +243,21 @@ export function UserDetail({ id }: { id: string }) {
       <p>上传 {gigabytes(data.bytes_up)} GB · 下载 {gigabytes(data.bytes_down)} GB</p>
       <UsageChart daily={data.daily} />
     </section> : <p>正在加载流量…</p>}
+  </Page>;
+}
+
+type SupportTicket = { id: string; user: string; message: string; createdAt: string; notified: boolean };
+
+export function SupportInbox() {
+  const { data, error } = useData<{ items: SupportTicket[] }>("/support");
+  return <Page title="客服留言">
+    {error ? <ErrorMessage message={error} /> : !data ? <p>正在加载留言…</p> :
+      data.items.length === 0 ? <p>暂无客服留言。</p> :
+      data.items.map((ticket) => <article className={styles.card} key={ticket.id}>
+        <strong>{ticket.user}</strong> · <time dateTime={ticket.createdAt}>{dateLabel(ticket.createdAt)}</time>
+        <p style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{ticket.message}</p>
+        <small>工单 {ticket.id} · {ticket.notified ? "Telegram 已通知" : "Telegram 未通知"}</small>
+      </article>)
+    }
   </Page>;
 }

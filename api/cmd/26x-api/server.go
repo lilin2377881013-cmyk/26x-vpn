@@ -73,6 +73,8 @@ func (s *server) routes() http.Handler {
 	mux.HandleFunc("POST /api/v1/auth/trial", s.startTrial)
 	mux.HandleFunc("POST /api/v1/me/checkout", s.requireUser(s.withUserCSRF(s.checkout)))
 	mux.HandleFunc("POST /api/v1/me/password", s.requireUser(s.withUserCSRF(s.changeMyPassword)))
+	mux.HandleFunc("POST /api/v1/me/support", s.requireUser(s.withUserCSRF(s.submitSupport)))
+	mux.HandleFunc("GET /api/v1/admin/support", s.requireAdmin(s.listSupport, "owner", "operations", "support"))
 	mux.HandleFunc("GET /api/v1/me", s.requireUser(s.userMe))
 	mux.HandleFunc("GET /api/v1/me/plans", s.requireUser(s.listAvailablePlans))
 	mux.HandleFunc("GET /api/v1/me/devices", s.requireUser(s.listMyDevices))

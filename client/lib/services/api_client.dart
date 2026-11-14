@@ -104,6 +104,19 @@ class ApiClient {
     return trial;
   }
 
+  Future<String> sendSupportMessage(String message) async {
+    final result = await _request(
+      'POST',
+      '/api/v1/me/support',
+      csrf: true,
+      body: {'message': message},
+    );
+    if (result.statusCode != HttpStatus.created) {
+      throw ApiException(_errorMessage(result.body, '留言发送失败，请稍后重试'));
+    }
+    return _decode(result.body)['id'] as String;
+  }
+
   Future<void> checkout(String planCode) async {
     final result = await _request(
       'POST',

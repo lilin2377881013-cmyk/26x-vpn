@@ -134,3 +134,15 @@ JSON request is `{"planCode":"standard-30d"}`. The API validates the plan
 against the active priced catalog and currently returns
 `503 payment_unavailable`. Integrate the payment provider in this handler
 using server-side prices and grant a subscription after verified payment.
+
+## Support inbox
+
+Apply migration 010 and deploy the API and web app. Authenticated app users
+can submit messages to `POST /api/v1/me/support`. The admin inbox at
+`/admin/support` shows the latest 100 submissions and notification status.
+
+To enable Telegram alerts, create a bot via BotFather, start a private chat
+with it, and set `TELEGRAM_BOT_TOKEN` and `TELEGRAM_SUPPORT_CHAT_ID` in
+the server-side API environment. Restart the API. Alerts contain the ticket
+ID and admin inbox link. The API saves messages before notification, and
+retries unsuccessful alerts from the database queue.

@@ -88,6 +88,7 @@ func main() {
 
 	signalCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+	go app.notifySupport(signalCtx)
 	if cfg.managedVLESS != nil {
 		go app.syncManagedCredentials(signalCtx)
 	}

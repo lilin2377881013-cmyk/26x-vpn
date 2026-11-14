@@ -2,6 +2,9 @@ import 'dart:async';
 import 'dart:io' show Platform;
 
 import 'package:material_ui/material_ui.dart';
+import 'package:flutter/services.dart' show Clipboard, ClipboardData;
+import 'package:qr_flutter/qr_flutter.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../models.dart';
 import '../services/api_client.dart';
@@ -952,6 +955,20 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
         const Divider(height: 1),
         ListTile(
+          leading: const Icon(Icons.qr_code_rounded),
+          title: const Text('防伪防丢失'),
+          trailing: const Icon(Icons.chevron_right),
+          onTap: _showOfficialLink,
+        ),
+        const Divider(height: 1),
+        ListTile(
+          leading: const Icon(Icons.chat_bubble_outline),
+          title: const Text('联系我们'),
+          trailing: const Icon(Icons.chevron_right),
+          onTap: _showSupport,
+        ),
+        const Divider(height: 1),
+        ListTile(
           leading: const Icon(Icons.logout_rounded),
           title: const Text('退出登录'),
           onTap: _busy ? null : _signOut,
@@ -959,6 +976,95 @@ class _HomeScreenState extends State<HomeScreen> {
       ],
     );
   }
+
+  Future<void> _showOfficialLink() async {
+    const website = 'https://26xvpn.com';
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute(
+        builder: (context) => Scaffold(
+          backgroundColor: _pageColor,
+          appBar: AppBar(
+            title: const Text('防伪防丢失'),
+            foregroundColor: Colors.white,
+            backgroundColor: _pageColor,
+          ),
+          body: SafeArea(
+            child: Center(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Text(
+                      '保存 26x 官网二维码',
+                      style: TextStyle(
+                        color: _gold,
+                        fontSize: 23,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                    QrImageView(
+                      data: website,
+                      size: 216,
+                      backgroundColor: Colors.white,
+                      padding: const EdgeInsets.all(22),
+                      semanticsLabel: '26x 官网二维码',
+                    ),
+                    const SizedBox(height: 16),
+                    TextButton(
+                      onPressed: () async {
+                        try {
+                          if (await launchUrl(
+                            Uri.parse(website),
+                            mode: LaunchMode.externalApplication,
+                          )) {
+                            return;
+                          }
+                        } catch (_) {
+                          // The copy action is available when the browser cannot open.
+                        }
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('无法打开浏览器，请复制官网链接。')),
+                          );
+                        }
+                      },
+                      child: const Text(
+                        website,
+                        style: TextStyle(color: _gold),
+                      ),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: () async {
+                        await Clipboard.setData(
+                          const ClipboardData(text: website),
+                        );
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('已复制官网链接')),
+                          );
+                        }
+                      },
+                      icon: const Icon(Icons.copy_outlined, color: _gold),
+                      label: const Text(
+                        '复制官网链接',
+                        style: TextStyle(color: _gold),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showSupport() => Navigator.of(context).push<void>(
+    MaterialPageRoute(builder: (_) => _SupportPage(api: widget.api)),
+  );
 
   Future<void> _loadPlans() async {
     try {
@@ -1526,4 +1632,116 @@ class _HomeScreenState extends State<HomeScreen> {
     'android' => Icons.phone_android_rounded,
     _ => Icons.devices_other_rounded,
   };
+}
+
+class _SupportPage extends StatefulWidget {
+  const _SupportPage({required this.api});
+  final ApiClient api;
+
+  @override
+  State<_SupportPage> createState() => _SupportPageState();
+}
+
+class _SupportPageState extends State<_SupportPage> {
+  final _message = TextEditingController();
+  bool _sending = false;
+  String? _error;
+  String? _ticket;
+
+  @override
+  void dispose() {
+    _message.dispose();
+    super.dispose();
+  }
+
+  Future<void> _send() async {
+    if (_sending || _message.text.trim().isEmpty) return;
+    setState(() {
+      _sending = true;
+      _error = null;
+    });
+    try {
+      final id = await widget.api.sendSupportMessage(_message.text.trim());
+      if (mounted) setState(() => _ticket = id);
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    } finally {
+      if (mounted) setState(() => _sending = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    backgroundColor: _HomeScreenState._pageColor,
+    appBar: AppBar(
+      title: const Text('联系我们'),
+      foregroundColor: Colors.white,
+      backgroundColor: _HomeScreenState._pageColor,
+    ),
+    body: SafeArea(
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 560),
+          child: ListView(
+            padding: const EdgeInsets.all(24),
+            children: [
+              if (_ticket case final String ticket) ...[
+                const Text(
+                  '留言已发送',
+                  style: TextStyle(color: _HomeScreenState._gold, fontSize: 23),
+                ),
+                const SizedBox(height: 12),
+                SelectableText(
+                  '工单号 $ticket',
+                  style: const TextStyle(color: Colors.white),
+                ),
+              ] else ...[
+                const Text(
+                  '请描述遇到的问题。请勿填写密码或支付信息。',
+                  style: TextStyle(color: _HomeScreenState._muted),
+                ),
+                const SizedBox(height: 16),
+                Theme(
+                  data: ThemeData.dark(useMaterial3: true),
+                  child: TextField(
+                    controller: _message,
+                    enabled: !_sending,
+                    onChanged: (_) => setState(() {}),
+                    maxLength: 2000,
+                    minLines: 5,
+                    maxLines: 9,
+                    decoration: const InputDecoration(
+                      labelText: '客服留言',
+                      border: OutlineInputBorder(),
+                      alignLabelWithHint: true,
+                    ),
+                  ),
+                ),
+                if (_error case final String message)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: Text(
+                      message,
+                      style: const TextStyle(color: Colors.orangeAccent),
+                    ),
+                  ),
+                const SizedBox(height: 12),
+                FilledButton(
+                  onPressed: _sending || _message.text.trim().isEmpty
+                      ? null
+                      : _send,
+                  style: FilledButton.styleFrom(
+                    backgroundColor: _HomeScreenState._gold,
+                    foregroundColor: const Color(0xFF292115),
+                    minimumSize: const Size.fromHeight(48),
+                  ),
+                  child: Text(_sending ? '正在发送…' : '发送留言'),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    ),
+  );
 }

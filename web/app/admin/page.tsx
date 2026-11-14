@@ -225,7 +225,7 @@ export default function AdminPage() {
       <aside className="admin-sidebar">
         <Link className="brand admin-brand" href="/"><span className="brand-mark">26</span><span className="brand-x">x</span><small>CONTROL</small></Link>
         <div className="sidebar-label">WORKSPACE</div>
-        <nav aria-label="后台导航">{!isDemo && <><Link className="admin-nav" href="/admin/nodes">节点管理</Link><Link className="admin-nav" href="/admin/users">用户流量</Link></>}{tabs.map((tab, index) => <button className={active === tab ? "admin-nav active" : "admin-nav"} key={tab} onClick={() => setActive(tab)}><span>{["◫", "♙", "▣", "⌁", "◇", "≡"][index]}</span>{tab}{tab === "节点" && <i className="nav-indicator" />}</button>)}</nav>
+        <nav aria-label="后台导航">{!isDemo && <><Link className="admin-nav" href="/admin/nodes">节点管理</Link><Link className="admin-nav" href="/admin/users">用户流量</Link><Link className="admin-nav" href="/admin/support">客服留言</Link></>}{tabs.map((tab, index) => <button className={active === tab ? "admin-nav active" : "admin-nav"} key={tab} onClick={() => setActive(tab)}><span>{["◫", "♙", "▣", "⌁", "◇", "≡"][index]}</span>{tab}{tab === "节点" && <i className="nav-indicator" />}</button>)}</nav>
         <div className="sidebar-bottom"><div className="admin-avatar">26</div><div><strong>{operator}</strong><small>{isDemo ? "开发演示账户" : "26x 管理员"}</small></div><button onClick={logout} aria-label="退出登录">↗</button></div>
       </aside>
 

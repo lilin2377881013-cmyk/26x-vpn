@@ -1272,9 +1272,7 @@ class _HomeScreenState extends State<HomeScreen> {
                             _regionRow(
                               routeContext,
                               region.key,
-                              premiumTab && region.key == 'HK'
-                                  ? '豪华香港专线'
-                                  : region.value,
+                              premiumTab ? '豪华${region.value}专线' : region.value,
                               locked: premiumTab && !premium,
                             ),
                         ],

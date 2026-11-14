@@ -36,6 +36,7 @@ class _HomeScreenState extends State<HomeScreen> {
   VpnNode? _selectedNode;
   TunnelSnapshot _tunnelState = const TunnelSnapshot(TunnelState.disconnected);
   bool _busy = false;
+  int _tab = 0;
   String? _message;
   String? _planError;
 
@@ -169,6 +170,7 @@ class _HomeScreenState extends State<HomeScreen> {
     } finally {
       if (mounted) {
         setState(() {
+          _tab = 0;
           _account = null;
           _devices = [];
           _nodes = [];
@@ -291,6 +293,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         if (dialogContext.mounted) Navigator.pop(dialogContext);
                         if (mounted) {
                           setState(() {
+                            _tab = 0;
                             _account = null;
                             _devices = [];
                             _nodes = [];
@@ -349,6 +352,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (_account != null) return _signedInShell();
     return Scaffold(
       body: DecoratedBox(
         decoration: const BoxDecoration(
@@ -369,15 +373,9 @@ class _HomeScreenState extends State<HomeScreen> {
                     _topBar(),
                     const SizedBox(height: 24),
                     Expanded(
-                      child: _busy && _account == null
-                          ? const Center(
-                              child: CircularProgressIndicator(
-                                color: Color(0xFF087E79),
-                              ),
-                            )
-                          : _account == null
-                          ? _loginCard()
-                          : _dashboard(),
+                      child: _busy
+                          ? const Center(child: CircularProgressIndicator())
+                          : _loginCard(),
                     ),
                     const SizedBox(height: 16),
                     const Text(
@@ -419,21 +417,6 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
       ),
       const Spacer(),
-      if (_account != null)
-        IconButton(
-          onPressed: _busy ? null : _showPlans,
-          tooltip: '查看套餐档位',
-          icon: const Icon(
-            Icons.workspace_premium_outlined,
-            color: Color(0xFF52646B),
-          ),
-        ),
-      if (_account != null)
-        IconButton(
-          onPressed: _busy ? null : _signOut,
-          tooltip: '退出登录',
-          icon: const Icon(Icons.logout_rounded, color: Color(0xFF52646B)),
-        ),
       IconButton(
         onPressed: _busy ? null : _refresh,
         tooltip: '刷新状态',
@@ -532,174 +515,203 @@ class _HomeScreenState extends State<HomeScreen> {
     ),
   );
 
-  Widget _dashboard() => SingleChildScrollView(
-    child: Column(
-      children: [
-        _connectionCard(),
-        const SizedBox(height: 14),
-        _planOverviewCard(),
-        const SizedBox(height: 14),
-        _surface(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  const Icon(
-                    Icons.person_outline_rounded,
-                    color: Color(0xFF087E79),
-                  ),
-                  const SizedBox(width: 9),
-                  const Text(
-                    '账户',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
-                  ),
-                  const Spacer(),
-                  Text(
-                    _account!.email,
-                    style: const TextStyle(
-                      color: Color(0xFF607178),
-                      fontSize: 12,
-                    ),
-                  ),
-                ],
-              ),
-              Align(
-                alignment: Alignment.centerRight,
-                child: TextButton.icon(
-                  onPressed: _busy ? null : _changePassword,
-                  icon: const Icon(Icons.key_rounded, size: 15),
-                  label: const Text('修改密码', style: TextStyle(fontSize: 11)),
-                ),
-              ),
-              const SizedBox(height: 16),
-              Row(
-                children: [
-                  const Text(
-                    '本机设备',
-                    style: TextStyle(color: Color(0xFF6D7D83)),
-                  ),
-                  const Spacer(),
-                  if (_device != null)
-                    Text(
-                      _device!.label,
-                      style: const TextStyle(fontWeight: FontWeight.w600),
-                    ),
-                ],
-              ),
-              if (_device == null) ...[
-                const SizedBox(height: 12),
-                const Text(
-                  '此安装尚未登记。登记后才能查看与本机相关的节点。',
-                  style: TextStyle(color: Color(0xFF718188), fontSize: 13),
-                ),
-                const SizedBox(height: 12),
-                OutlinedButton.icon(
-                  onPressed: _busy ? null : _registerDevice,
-                  icon: const Icon(Icons.add_rounded),
-                  label: const Text('注册本机设备'),
-                ),
-              ],
-              if (_devices.isNotEmpty) ...[
-                const Divider(height: 28),
-                const Text(
-                  '账户设备',
-                  style: TextStyle(color: Color(0xFF6D7D83), fontSize: 12),
-                ),
-                const SizedBox(height: 6),
-                ..._devices.map(
-                  (device) => Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 5),
-                    child: Row(
-                      children: [
-                        Icon(
-                          _platformIcon(device.platform),
-                          size: 17,
-                          color: const Color(0xFF698087),
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            '${device.label}${device.id == _device?.id ? ' · 本机' : ''}',
-                            style: const TextStyle(fontSize: 12),
-                          ),
-                        ),
-                        TextButton(
-                          onPressed: _busy ? null : () => _revokeDevice(device),
-                          child: const Text(
-                            '撤销',
-                            style: TextStyle(fontSize: 11),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
-              if (_account!.subscriptionEndsAt != null) ...[
-                const Divider(height: 28),
-                Row(
-                  children: [
-                    const Text(
-                      '订阅有效期至',
-                      style: TextStyle(color: Color(0xFF6D7D83)),
-                    ),
-                    const Spacer(),
-                    Text(
-                      _date(_account!.subscriptionEndsAt!),
-                      style: const TextStyle(fontWeight: FontWeight.w600),
-                    ),
-                  ],
-                ),
-              ],
-            ],
+  Widget _signedInShell() {
+    const background = Color(0xFF151922);
+    const accent = Color(0xFF71DBC3);
+    final active = _tab == 0;
+    return Scaffold(
+      backgroundColor: active ? background : const Color(0xFFF1F5F5),
+      appBar: AppBar(
+        backgroundColor: background,
+        foregroundColor: Colors.white,
+        centerTitle: true,
+        title: Text(const ['26x', '套餐', '我的'][_tab]),
+        actions: [
+          IconButton(
+            tooltip: '刷新',
+            onPressed: _busy || _isConnecting ? null : _refresh,
+            icon: const Icon(Icons.refresh_rounded),
           ),
-        ),
-        const SizedBox(height: 14),
-        _surface(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  const Icon(Icons.public_rounded, color: Color(0xFF087E79)),
-                  const SizedBox(width: 9),
-                  const Text(
-                    '节点地区',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
-                  ),
-                  const Spacer(),
-                  Text(
-                    '${_nodes.map(_regionCode).toSet().length}',
-                    style: const TextStyle(color: Color(0xFF718188)),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 14),
-              ..._nodeRegions.entries.map(
-                (region) => _nodeRegion(
-                  region.value,
-                  _nodes.where(
-                    (node) => node.region.trim().toUpperCase() == region.key,
-                  ),
-                ),
-              ),
-              ..._nodes
-                  .where(
-                    (node) => !_nodeRegions.containsKey(
-                      node.region.trim().toUpperCase(),
-                    ),
-                  )
-                  .map(_nodeTile),
-            ],
-          ),
-        ),
-        if (_message != null) ...[
-          const SizedBox(height: 14),
-          _messageBox(_message!),
+          const SizedBox(width: 8),
         ],
+      ),
+      body: SafeArea(
+        bottom: false,
+        child: active ? _connectionCard() : _detailsPage(),
+      ),
+      bottomNavigationBar: NavigationBar(
+        height: 68,
+        backgroundColor: const Color(0xFF202631),
+        indicatorColor: const Color(0xFF334A49),
+        selectedIndex: _tab,
+        labelTextStyle: WidgetStateProperty.resolveWith(
+          (states) => TextStyle(
+            color: states.contains(WidgetState.selected)
+                ? accent
+                : const Color(0xFFC1C9D3),
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        onDestinationSelected: (index) => setState(() => _tab = index),
+        destinations: const [
+          NavigationDestination(
+            icon: Icon(Icons.bolt_outlined, color: Color(0xFFC1C9D3)),
+            selectedIcon: Icon(Icons.bolt_rounded, color: accent),
+            label: '连接',
+          ),
+          NavigationDestination(
+            icon: Icon(
+              Icons.workspace_premium_outlined,
+              color: Color(0xFFC1C9D3),
+            ),
+            selectedIcon: Icon(Icons.workspace_premium_rounded, color: accent),
+            label: '套餐',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.person_outline_rounded, color: Color(0xFFC1C9D3)),
+            selectedIcon: Icon(Icons.person_rounded, color: accent),
+            label: '我的',
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _detailsPage() => Center(
+    child: ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 600),
+      child: ListView(
+        padding: const EdgeInsets.all(20),
+        children: [
+          if (_tab == 1) ...[
+            _planOverviewCard(),
+            const SizedBox(height: 16),
+            _planTierCard('standard', '普通档', Icons.shield_outlined),
+            const SizedBox(height: 12),
+            _planTierCard('premium', '豪华档', Icons.workspace_premium_outlined),
+            if (_planError != null) _messageBox(_planError!),
+            const SizedBox(height: 12),
+            const Text('套餐由管理员开通。'),
+          ] else
+            _accountCard(),
+          if (_message != null) ...[
+            const SizedBox(height: 12),
+            _messageBox(_message!),
+          ],
+        ],
+      ),
+    ),
+  );
+
+  Widget _accountCard() => _surface(
+    padding: const EdgeInsets.all(20),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            const Icon(Icons.person_outline_rounded, color: Color(0xFF087E79)),
+            const SizedBox(width: 9),
+            const Text(
+              '账户',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                _account!.email,
+                textAlign: TextAlign.end,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(color: Color(0xFF607178), fontSize: 12),
+              ),
+            ),
+          ],
+        ),
+        Align(
+          alignment: Alignment.centerRight,
+          child: TextButton.icon(
+            onPressed: _busy ? null : _changePassword,
+            icon: const Icon(Icons.key_rounded, size: 15),
+            label: const Text('修改密码', style: TextStyle(fontSize: 11)),
+          ),
+        ),
+        const SizedBox(height: 16),
+        Row(
+          children: [
+            const Text('本机设备', style: TextStyle(color: Color(0xFF6D7D83))),
+            const Spacer(),
+            if (_device != null)
+              Text(
+                _device!.label,
+                style: const TextStyle(fontWeight: FontWeight.w600),
+              ),
+          ],
+        ),
+        if (_device == null) ...[
+          const SizedBox(height: 12),
+          const Text(
+            '此安装尚未登记。登记后才能查看与本机相关的节点。',
+            style: TextStyle(color: Color(0xFF718188), fontSize: 13),
+          ),
+          const SizedBox(height: 12),
+          OutlinedButton.icon(
+            onPressed: _busy ? null : _registerDevice,
+            icon: const Icon(Icons.add_rounded),
+            label: const Text('注册本机设备'),
+          ),
+        ],
+        if (_devices.isNotEmpty) ...[
+          const Divider(height: 28),
+          const Text(
+            '账户设备',
+            style: TextStyle(color: Color(0xFF6D7D83), fontSize: 12),
+          ),
+          const SizedBox(height: 6),
+          ..._devices.map(
+            (device) => Padding(
+              padding: const EdgeInsets.symmetric(vertical: 5),
+              child: Row(
+                children: [
+                  Icon(
+                    _platformIcon(device.platform),
+                    size: 17,
+                    color: const Color(0xFF698087),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      '${device.label}${device.id == _device?.id ? ' · 本机' : ''}',
+                      style: const TextStyle(fontSize: 12),
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: _busy ? null : () => _revokeDevice(device),
+                    child: const Text('撤销', style: TextStyle(fontSize: 11)),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+        if (_account!.subscriptionEndsAt != null) ...[
+          const Divider(height: 28),
+          Row(
+            children: [
+              const Text('订阅有效期至', style: TextStyle(color: Color(0xFF6D7D83))),
+              const Spacer(),
+              Text(
+                _date(_account!.subscriptionEndsAt!),
+                style: const TextStyle(fontWeight: FontWeight.w600),
+              ),
+            ],
+          ),
+        ],
+        const SizedBox(height: 12),
+        TextButton.icon(
+          onPressed: _busy ? null : _signOut,
+          icon: const Icon(Icons.logout_rounded),
+          label: const Text('退出登录'),
+        ),
       ],
     ),
   );
@@ -723,19 +735,14 @@ class _HomeScreenState extends State<HomeScreen> {
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(
+        const Row(
           children: [
-            const Icon(
-              Icons.workspace_premium_outlined,
-              color: Color(0xFF087E79),
-            ),
-            const SizedBox(width: 9),
-            const Text(
+            Icon(Icons.workspace_premium_outlined, color: Color(0xFF087E79)),
+            SizedBox(width: 9),
+            Text(
               '套餐档位',
               style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
             ),
-            const Spacer(),
-            TextButton(onPressed: _showPlans, child: const Text('查看两档')),
           ],
         ),
         Text(
@@ -772,72 +779,6 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
     ),
   );
-
-  Future<void> _showPlans() async {
-    await _loadPlans();
-    if (!mounted) return;
-    await showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (context) => SafeArea(
-        child: Container(
-          constraints: BoxConstraints(
-            maxHeight: MediaQuery.sizeOf(context).height * .82,
-          ),
-          padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
-          decoration: const BoxDecoration(
-            color: Color(0xFFF8FAFA),
-            borderRadius: BorderRadius.vertical(top: Radius.circular(26)),
-          ),
-          child: SingleChildScrollView(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Center(
-                  child: Container(
-                    width: 38,
-                    height: 4,
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFD2DADA),
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 20),
-                const Text(
-                  '选择 26x 套餐档位',
-                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800),
-                ),
-                const SizedBox(height: 6),
-                const Text(
-                  '期限、设备数和流量上限以已配置的套餐为准。',
-                  style: TextStyle(color: Color(0xFF718188), fontSize: 13),
-                ),
-                const SizedBox(height: 18),
-                _planTierCard('standard', '普通套餐', Icons.shield_outlined),
-                const SizedBox(height: 12),
-                _planTierCard(
-                  'premium',
-                  '豪华档',
-                  Icons.workspace_premium_outlined,
-                ),
-                if (_planError != null) ...[
-                  const SizedBox(height: 12),
-                  _messageBox('暂时无法读取已开放套餐：$_planError'),
-                ],
-                const SizedBox(height: 14),
-                const Text(
-                  '套餐由管理员开通；客户端暂不提供在线支付。',
-                  style: TextStyle(color: Color(0xFF718188), fontSize: 12),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
 
   Widget _planTierCard(String tier, String title, IconData icon) {
     final plans = _plans.where((plan) => plan.tier == tier).toList();
@@ -918,6 +859,13 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _connectionCard() {
+    const muted = Color(0xFFAAB6C6);
+    final color = _isConnected
+        ? const Color(0xFF71DBC3)
+        : const Color(0xFFE2EAF4);
+    final node = _selectedNode;
+    final region = node == null ? null : _regionCode(node);
+    final label = node == null ? '选择地区' : _nodeRegions[region] ?? node.name;
     final status = switch (_tunnelState.state) {
       TunnelState.connected => '已连接',
       TunnelState.connecting => '正在连接',
@@ -926,130 +874,148 @@ class _HomeScreenState extends State<HomeScreen> {
       TunnelState.unavailable => '尚未就绪',
       TunnelState.disconnected => '未连接',
     };
-    final tone = _isConnected
-        ? const Color(0xFF2CB18A)
-        : const Color(0xFF087E79);
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(24, 26, 24, 22),
-      decoration: BoxDecoration(
-        color: const Color(0xFF10222A),
-        borderRadius: BorderRadius.circular(26),
-        boxShadow: const [
-          BoxShadow(
-            color: Color(0x1C173238),
-            blurRadius: 24,
-            offset: Offset(0, 12),
-          ),
-        ],
+    return DecoratedBox(
+      decoration: const BoxDecoration(
+        gradient: RadialGradient(
+          center: Alignment(0, -.6),
+          radius: 1.15,
+          colors: [Color(0xFF273542), Color(0xFF151922)],
+        ),
       ),
-      child: Column(
-        children: [
-          Row(
-            children: [
-              const Text(
-                '安全连接',
-                style: TextStyle(
-                  color: Color(0xFFC8D8D9),
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-              const Spacer(),
-              Container(
-                width: 8,
-                height: 8,
-                decoration: BoxDecoration(
-                  color: _isConnected
-                      ? const Color(0xFF47D7A6)
-                      : const Color(0xFF82949A),
-                  shape: BoxShape.circle,
-                ),
-              ),
-              const SizedBox(width: 8),
-              Text(
-                status,
-                style: const TextStyle(color: Color(0xFFC8D8D9), fontSize: 12),
-              ),
-            ],
-          ),
-          const SizedBox(height: 22),
-          Container(
-            width: 112,
-            height: 112,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              border: Border.all(color: tone.withValues(alpha: .42), width: 1),
-              color: tone.withValues(alpha: .10),
+      child: LayoutBuilder(
+        builder: (context, bounds) => SingleChildScrollView(
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 28),
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              minHeight: (bounds.maxHeight - 56)
+                  .clamp(0, double.infinity)
+                  .toDouble(),
             ),
-            child: Icon(
-              _isConnected ? Icons.shield_rounded : Icons.shield_outlined,
-              color: tone,
-              size: 48,
-            ),
-          ),
-          const SizedBox(height: 16),
-          Text(
-            _isConnected ? 'VPN 隧道已连接' : '尚未建立 VPN 隧道',
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 19,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            _tunnelState.message ??
-                (_selectedNode == null
-                    ? '选择一个可用节点'
-                    : (_nodeRegions[_regionCode(_selectedNode!)] ??
-                          _selectedNode!.name)),
-            textAlign: TextAlign.center,
-            style: const TextStyle(color: Color(0xFF9AAEB2), fontSize: 13),
-          ),
-          const SizedBox(height: 22),
-          SizedBox(
-            width: double.infinity,
-            height: 50,
-            child: FilledButton(
-              onPressed: _busy || _isConnecting ? null : _toggleTunnel,
-              style: FilledButton.styleFrom(
-                backgroundColor: _isConnected
-                    ? const Color(0xFF33474E)
-                    : const Color(0xFF21A98B),
-                disabledBackgroundColor: const Color(0xFF42555B),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(15),
-                ),
-              ),
-              child: _isConnecting
-                  ? const SizedBox(
-                      width: 19,
-                      height: 19,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: Colors.white,
-                      ),
-                    )
-                  : Text(
-                      _isConnected ? '断开连接' : '连接 VPN',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w700,
-                        fontSize: 15,
+            child: Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 420),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      status,
+                      style: TextStyle(
+                        color: _isConnected ? color : muted,
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
+                    const SizedBox(height: 24),
+                    OutlinedButton(
+                      onPressed: _busy || _isConnecting || _device == null
+                          ? null
+                          : _toggleTunnel,
+                      style: OutlinedButton.styleFrom(
+                        fixedSize: Size.square(
+                          bounds.maxHeight < 460 ? 128 : 164,
+                        ),
+                        shape: const CircleBorder(),
+                        foregroundColor: color,
+                        disabledForegroundColor: muted,
+                        backgroundColor: _isConnected
+                            ? const Color(0xFF203C3D)
+                            : const Color(0xFF202A36),
+                        side: BorderSide(
+                          color: _isConnected ? color : const Color(0xFF445365),
+                          width: 2,
+                        ),
+                      ),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (_isConnecting)
+                            SizedBox.square(
+                              dimension: 32,
+                              child: CircularProgressIndicator(
+                                color: color,
+                                strokeWidth: 2,
+                              ),
+                            )
+                          else
+                            const Icon(
+                              Icons.power_settings_new_rounded,
+                              size: 38,
+                            ),
+                          const SizedBox(height: 10),
+                          Text(
+                            _isConnecting
+                                ? status
+                                : _isConnected
+                                ? '断开连接'
+                                : '连接 VPN',
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 36),
+                    if (_device == null)
+                      FilledButton.tonalIcon(
+                        onPressed: _busy ? null : _registerDevice,
+                        icon: const Icon(Icons.add_rounded),
+                        label: const Text('注册本机设备'),
+                      )
+                    else
+                      OutlinedButton(
+                        onPressed: _busy || _isConnecting ? null : _showRegions,
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: Colors.white,
+                          backgroundColor: const Color(0xFF252F3D),
+                          side: const BorderSide(color: Color(0xFF425065)),
+                          minimumSize: const Size(224, 52),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.public_rounded, size: 20),
+                            const SizedBox(width: 12),
+                            Text(label),
+                            const SizedBox(width: 24),
+                            const Icon(Icons.chevron_right_rounded, size: 20),
+                          ],
+                        ),
+                      ),
+                    if ((_message ?? _tunnelState.message)
+                        case final String message) ...[
+                      const SizedBox(height: 16),
+                      _messageBox(message),
+                    ],
+                  ],
+                ),
+              ),
             ),
           ),
-          const SizedBox(height: 12),
-          const Text(
-            '只有系统隧道报告连接成功时，状态才会显示为已连接。',
-            textAlign: TextAlign.center,
-            style: TextStyle(color: Color(0xFF82949A), fontSize: 11),
-          ),
-        ],
+        ),
       ),
     );
   }
+
+  Future<void> _showRegions() => showModalBottomSheet<void>(
+    context: context,
+    showDragHandle: true,
+    useSafeArea: true,
+    builder: (context) => SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text('选择地区', style: Theme.of(context).textTheme.titleLarge),
+          const SizedBox(height: 14),
+          for (final region in _nodeRegions.entries)
+            _nodeRegion(
+              region.value,
+              _nodes.where((node) => _regionCode(node) == region.key),
+            ),
+          ..._nodes
+              .where((node) => !_nodeRegions.containsKey(_regionCode(node)))
+              .map(_nodeTile),
+        ],
+      ),
+    ),
+  );
 
   String _regionCode(VpnNode node) => node.region.trim().toUpperCase();
 
@@ -1077,6 +1043,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 (_isConnected && (selected || !node.connectable))
             ? null
             : () {
+                Navigator.of(context).pop();
                 if (_isConnected) {
                   unawaited(_connectTo(node, switchRegion: true));
                 } else {

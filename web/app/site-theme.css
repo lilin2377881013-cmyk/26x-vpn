@@ -122,3 +122,23 @@
   .final-site .section { padding-block: 44px; }
 }
 @media (max-width: 420px) { .download-grid { grid-template-columns: 1fr; } }
+.release-band { background: #202631; border-block: 1px solid var(--line); }
+.region-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.region-grid li {
+  padding: 18px 10px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  border-radius: 12px;
+  text-align: center;
+  font-size: 17px;
+}
+@media (max-width: 650px) {
+  .region-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}

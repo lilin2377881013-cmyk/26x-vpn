@@ -57,12 +57,23 @@ export default async function HomePage() {
                 {channels.map(([id, label]) => links[id] ? <a className={"button" + (id === "ios-store" ? " download-secondary" : "")} href={links[id]} key={id}>{label}</a>
                   : <span className="download-pending" key={id}>{label} · 尚未开放</span>)}
               </div>
-              {mark === "iOS" && <p className="download-note">优先推荐 TestFlight。受 App Store 渠道成本影响，26x 在 App Store 内的会员费用会高 10%。</p>}
+              {mark === "iOS" && <p className="download-note">优先推荐 TestFlight。受 App Store 渠道成本影响，26x 拟将 App Store 渠道的会员费用定为其他渠道的 110%，实际以购买页面为准。</p>}
             </article>
           ))}
         </div>
       </section>
-      <section className="section wrap" id="features">
+      <section className="release-band" id="features">
+       <div className="section wrap">
+        <div className="section-heading">
+          <div><h2>四个地区，<em>随时切换</em></h2></div>
+          <p>连接后可直接在客户端切换线路。</p>
+        </div>
+        <ul className="region-grid" aria-label="可选线路">
+          <li>🇭🇰 香港</li><li>🇯🇵 日本</li><li>🇸🇬 新加坡</li><li>🇺🇸 美国</li>
+        </ul>
+       </div>
+      </section>
+      <section className="section wrap">
         <div className="section-heading"><div><h2>连接和设备，<em>一处管理</em></h2></div></div>
         <div className="feature-grid">
           <article className="feature-card"><h3>一键连接</h3><p>随时查看 VPN 状态，连接中也可以直接切换地区。</p></article>

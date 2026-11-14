@@ -7,7 +7,7 @@ export const metadata: Metadata = {
 };
 
 const platforms = [
-  { name: "iPhone", mark: "iOS", channels: [["ios-tf", "TestFlight 下载"], ["ios-store", "App Store 下载"]] },
+  { name: "iPhone", mark: "iOS", channels: [["ios-tf", "TestFlight"], ["ios-store", "App Store"]] },
   { name: "macOS", mark: "Mac", channels: [["macos", "下载 macOS 版"]] },
   { name: "Windows", mark: "PC", channels: [["windows", "下载 Windows 版"]] },
   { name: "Android", mark: "APK", channels: [["android", "下载 Android 版"]] },
@@ -54,10 +54,17 @@ export default async function HomePage() {
               <span className="platform-mark">{mark}</span>
               <h3>{name}</h3>
               <div className="download-actions">
-                {channels.map(([id, label]) => links[id] ? <a className={"button" + (id === "ios-store" ? " download-secondary" : "")} href={links[id]} key={id}>{label}</a>
-                  : <span className="download-pending" key={id}>{label} · 尚未开放</span>)}
+                {channels.map(([id, label]) => {
+                  const address = links[id];
+                  const store = id === "ios-store";
+                  const className = "button" + (store ? " download-secondary" : "");
+                  return <div className="download-option" key={id}>
+                    {address ? <a className={className} href={address}>{label}</a>
+                      : <button className={className} type="button" disabled>{label}</button>}
+                    {store && <span className="download-tax">因税贵10%</span>}
+                  </div>;
+                })}
               </div>
-              {mark === "iOS" && <p className="download-note">优先推荐 TestFlight。受 App Store 渠道成本影响，26x 拟将 App Store 渠道的会员费用定为其他渠道的 110%，实际以购买页面为准。</p>}
             </article>
           ))}
         </div>

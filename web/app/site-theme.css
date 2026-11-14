@@ -110,8 +110,10 @@
 .download-card h3 { margin: 14px 0; font-size: 20px; }
 .platform-mark { color: var(--gold); font-weight: 700; }
 .download-actions { display: grid; gap: 10px; }
-.download-pending, .download-note { color: var(--muted); font-size: 13px; line-height: 1.6; }
-.download-note { margin-bottom: 0; }
+.download-option { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.download-option .button { min-width: 0; height: 40px; padding-inline: 12px; }
+.download-option .button:disabled { opacity: .56; cursor: not-allowed; transform: none; }
+.download-tax { color: var(--gold); font-size: 12px; white-space: nowrap; }
 .final-site .download-secondary { background: #394457; color: var(--ink); }
 .final-site .download-secondary:hover { background: #46536a; }
 .final-site .feature-card { min-height: 130px; }

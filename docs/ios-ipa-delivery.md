@@ -6,17 +6,17 @@ The project deliverable is a signed `.ipa` prepared for the owner to upload to A
 
 ## Current state
 
-No IPA can be produced from the current scaffold. The Dart client was analyzed using Flutter 3.50 and generated app runners are present, but this host has no full Xcode, Apple signing assets, Team ID, or Packet Tunnel entitlement. The Xcode project still lacks the separate packet-tunnel extension target, and no protocol engine is linked. The client therefore remains unavailable for real VPN traffic. Complete the engine and iOS integration milestones before creating a release archive.
+The GitHub Actions workflow builds an unsigned arm64 IPA with libXray and an embedded Packet Tunnel extension. The default app and extension bundle identifiers are `com.26xvpn.client` and `com.26xvpn.client.PacketTunnel`. App Store Connect requires the signed export described below.
 
 ## Required owner configuration
 
 - Apple Developer Team ID and App Store Connect app record.
 - Final reverse-domain bundle identifier owned by the developer account.
-- App Store distribution signing identity and provisioning profile.
+- Apple Distribution signing identity and App Store provisioning profiles for both targets.
 - Network Extension `packet-tunnel-provider` capability for the app/extension identifiers.
 - App-specific privacy wording, support URL, and export-compliance answers for encryption.
 
-Signing assets must be supplied through the build host's secure keychain or CI secret store, never committed to this repository or pasted into source files. The current workspace host only has Command Line Tools, not full Xcode, so it cannot produce an Apple archive or signed IPA.
+Supply signing assets through the build host's secure keychain or CI secret store. Set the signing team for both the Runner and PacketTunnel targets, archive the Runner scheme in Xcode, and export for App Store Connect distribution.
 
 ## Build output
 

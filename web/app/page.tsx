@@ -57,10 +57,9 @@ export default async function HomePage() {
                 {channels.map(([id, label]) => {
                   const address = links[id];
                   const store = id === "ios-store";
-                  const className = "button" + (store ? " download-secondary" : "");
                   return <div className="download-option" key={id}>
-                    {address ? <a className={className} href={address}>{label}</a>
-                      : <button className={className} type="button" disabled>{label}</button>}
+                    {address ? <a className="button" href={address}>{label}</a>
+                      : <button className="button" type="button" disabled>{label}</button>}
                     {store && <span className="download-tax">因税贵10%</span>}
                   </div>;
                 })}

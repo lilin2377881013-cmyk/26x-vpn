@@ -1,0 +1,55 @@
+name: 26x-vpn
+
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-26x}
+      POSTGRES_USER: ${POSTGRES_USER:-26x}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-26x} -d ${POSTGRES_DB:-26x}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  api:
+    build: ./api
+    restart: unless-stopped
+    environment:
+      HTTP_ADDR: 0.0.0.0:8080
+      DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL in .env}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      TRUSTED_ORIGINS: ${TRUSTED_ORIGINS:-http://localhost:3000}
+      TRUSTED_PROXY_CIDRS: ${TRUSTED_PROXY_CIDRS:-}
+      CREDENTIAL_ENCRYPTION_KEY: ${CREDENTIAL_ENCRYPTION_KEY:-}
+      INITIAL_ADMIN_EMAIL: ${INITIAL_ADMIN_EMAIL:-}
+      INITIAL_ADMIN_PASSWORD: ${INITIAL_ADMIN_PASSWORD:-}
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8080:8080"
+
+  web:
+    build:
+      context: ./web
+      args:
+        NEXT_PUBLIC_ADMIN_DEMO_MODE: ${NEXT_PUBLIC_ADMIN_DEMO_MODE:-true}
+        NEXT_PUBLIC_SITE_URL: ${NEXT_PUBLIC_SITE_URL:-http://localhost:3000}
+        API_ORIGIN: http://api:8080
+    restart: unless-stopped
+    environment:
+      API_ORIGIN: http://api:8080
+      NEXT_PUBLIC_ADMIN_DEMO_MODE: ${NEXT_PUBLIC_ADMIN_DEMO_MODE:-true}
+      NEXT_PUBLIC_SITE_URL: ${NEXT_PUBLIC_SITE_URL:-http://localhost:3000}
+    depends_on:
+      - api
+    ports:
+      - "127.0.0.1:3000:3000"
+
+volumes:
+  postgres_data:

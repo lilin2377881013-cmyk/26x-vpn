@@ -1,0 +1,93 @@
+--- a/proxy/vless/inbound/inbound.go
++++ b/proxy/vless/inbound/inbound.go
+@@ -8,6 +8,7 @@
+ 	"io"
+ 	"strconv"
+ 	"strings"
++	"sync"
+ 	"time"
+ 
+ 	"github.com/xtls/xray-core/app/dispatcher"
+@@ -76,6 +77,8 @@
+ 	policyManager          policy.Manager
+ 	stats                  stats.Manager
+ 	validator              vless.Validator
++	connectionsMu          sync.Mutex
++	connections            map[*protocol.MemoryUser]map[stat.Connection]struct{}
+ 	decryption             *encryption.ServerInstance
+ 	outboundHandlerManager outbound.Manager
+ 	observer               features.Feature
+@@ -236,13 +239,57 @@
+ 
+ // AddUser implements proxy.UserManager.AddUser().
+ func (h *Handler) AddUser(ctx context.Context, u *protocol.MemoryUser) error {
++	h.connectionsMu.Lock()
++	defer h.connectionsMu.Unlock()
+ 	return h.validator.Add(u)
+ }
+ 
+ // RemoveUser implements proxy.UserManager.RemoveUser().
+ func (h *Handler) RemoveUser(ctx context.Context, e string) error {
+-	h.RemoveReverse(h.validator.GetByEmail(e))
+-	return h.validator.Del(e)
++	h.connectionsMu.Lock()
++	user := h.validator.GetByEmail(e)
++	err := h.validator.Del(e)
++	connections := h.connections[user]
++	if err == nil {
++		delete(h.connections, user)
++	}
++	h.connectionsMu.Unlock()
++	if err != nil {
++		return err
++	}
++	h.RemoveReverse(user)
++	for connection := range connections {
++		_ = connection.SetDeadline(time.Now())
++		_ = connection.Close()
++	}
++	return nil
++}
++
++// trackConnection serializes authentication with removal. A request decoded
++// just before removal cannot register a connection after its user is deleted.
++func (h *Handler) trackConnection(user *protocol.MemoryUser, connection stat.Connection) bool {
++	h.connectionsMu.Lock()
++	defer h.connectionsMu.Unlock()
++	if h.validator.GetByEmail(user.Email) != user {
++		return false
++	}
++	if h.connections == nil {
++		h.connections = make(map[*protocol.MemoryUser]map[stat.Connection]struct{})
++	}
++	if h.connections[user] == nil {
++		h.connections[user] = make(map[stat.Connection]struct{})
++	}
++	h.connections[user][connection] = struct{}{}
++	return true
++}
++
++func (h *Handler) untrackConnection(user *protocol.MemoryUser, connection stat.Connection) {
++	h.connectionsMu.Lock()
++	defer h.connectionsMu.Unlock()
++	delete(h.connections[user], connection)
++	if len(h.connections[user]) == 0 {
++		delete(h.connections, user)
++	}
+ }
+ 
+ // GetUser implements proxy.UserManager.GetUser().
+@@ -531,6 +578,13 @@
+ 	if inbound == nil {
+ 		panic("no inbound metadata")
+ 	}
++	if request.User.Email != "" {
++		if !h.trackConnection(request.User, connection) {
++			return errors.New("VLESS user was removed during authentication")
++		}
++		defer h.untrackConnection(request.User, connection)
++	}
++
+ 	inbound.Name = "vless"
+ 	inbound.User = request.User
+ 	inbound.VlessRoute = net.PortFromBytes(userSentID[6:8])

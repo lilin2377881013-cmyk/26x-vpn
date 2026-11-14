@@ -338,6 +338,7 @@ class ApiClient {
       final error = _decode(result.body)['error'];
       final code = error is Map ? error['code'] : null;
       throw ApiException(switch (code) {
+        'traffic_quota_exceeded' => '本月流量额度已用完。',
         'connection_limit_reached' => '已达到套餐同时在线上限，请先断开另一台设备。',
         'device_already_connected' => '本机仍占用一个连接名额，请稍后重试。',
         'connection_lease_expired' => '连接名额已失效，请重新连接。',

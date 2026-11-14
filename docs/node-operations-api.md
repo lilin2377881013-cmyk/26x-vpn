@@ -145,3 +145,20 @@ To enable Telegram alerts, create a bot via BotFather, start a private chat
 with it, and set `TELEGRAM_BOT_TOKEN` and `TELEGRAM_SUPPORT_CHAT_ID` in
 the server-side API environment. Restart the API. Alerts contain the ticket ID, message body and admin inbox link. The API saves messages before notification, and
 retries unsuccessful alerts from the database queue.
+
+## Traffic limits
+
+Migration 012 adds per-user and per-node monthly traffic quotas and bandwidth
+settings. Owners and operators can change them on the detail pages. Clearing a
+quota means unlimited. Quotas count upload plus download for the UTC calendar
+month using the daily usage tables. The API denies lease admission and renewal
+when the account reaches its quota. The regional allocator skips nodes that
+reached their quota and does not renew leases assigned to those nodes.
+
+User bandwidth defaults to 3 Mbps and can be set from 1 to 3 Mbps. The node
+setting is an aggregate rate in Mbps, with an empty value meaning unlimited.
+These two bandwidth values are stored as desired settings. The node operator
+must apply them to the actual VPN traffic before they affect throughput.
+Existing nodes without a collector writing daily totals cannot enforce quotas
+based on measured usage. Older leases without an assigned endpoint do not
+check a node quota.

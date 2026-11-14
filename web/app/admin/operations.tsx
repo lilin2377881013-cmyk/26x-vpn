@@ -158,6 +158,51 @@ function UsageChart({ daily }: { daily: Daily[] }) {
   </div>;
 }
 
+type TrafficLimits = { monthlyQuotaBytes: number | null; bandwidthMbps: number | null };
+
+function TrafficLimitsForm({ path, user = false }: { path: string; user?: boolean }) {
+  const { data, error } = useData<TrafficLimits>(path);
+  const [status, setStatus] = useState("");
+  const [busy, setBusy] = useState(false);
+  async function save(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const fields = new FormData(event.currentTarget);
+    const gb = fields.get("quota");
+    const bandwidth = fields.get("bandwidth");
+    setBusy(true);
+    setStatus("");
+    try {
+      await write(path, "PUT", {
+        monthlyQuotaBytes: gb ? Math.round(Number(gb) * 1e9) : null,
+        bandwidthMbps: bandwidth ? Number(bandwidth) : null,
+      });
+      setStatus("已保存");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "保存失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return <section className={styles.card}>
+    <h2>流量控制</h2>
+    {error ? <ErrorMessage message={error} /> : !data ? <p>正在读取限制…</p> :
+      <form className="admin-form" onSubmit={save}>
+        <label>每月流量额度（GB，留空不限额）
+          <input name="quota" type="number" min="0.001" max="9000000" step="any"
+            defaultValue={data.monthlyQuotaBytes == null ? "" : data.monthlyQuotaBytes / 1e9} />
+        </label>
+        <label>{user ? "用户带宽上限（Mbps）" : "该节点总带宽上限（Mbps，留空不限速）"}
+          <input name="bandwidth" type="number" min="1" max={user ? 3 : 100000} step="1" required={user}
+            defaultValue={data.bandwidthMbps ?? (user ? 3 : "")} />
+        </label>
+        <p>{user ? "每个用户默认 3 Mbps，可调低。" : "仅保存此节点的带宽设置。"} 实际限速需由节点执行。</p>
+        <div><button className="primary-action" disabled={busy}>{busy ? "保存中…" : "保存限制"}</button></div>
+        {status && <p role="status">{status}</p>}
+      </form>}
+  </section>;
+}
+
 export function NodeDetail({ code }: { code: string }) {
   const path = "/nodes/" + encodeURIComponent(code);
   const router = useRouter();
@@ -205,6 +250,7 @@ export function NodeDetail({ code }: { code: string }) {
           setNotice("节点设置已保存");
         }} />
       </section>
+      <TrafficLimitsForm path={path + "/traffic-limits"} />
       <section className={styles.card}>
         <h2>最近 30 天流量</h2>
         {stats.error ? <ErrorMessage message={stats.error} /> : stats.data ? <>
@@ -251,6 +297,7 @@ export function UserDetail({ id }: { id: string }) {
       <p>上传 {gigabytes(data.bytes_up)} GB · 下载 {gigabytes(data.bytes_down)} GB</p>
       <UsageChart daily={data.daily} />
     </section> : <p>正在加载流量…</p>}
+    {data && <TrafficLimitsForm key={id} path={`/users/${encodeURIComponent(id)}/traffic-limits`} user />}
   </Page>;
 }
 

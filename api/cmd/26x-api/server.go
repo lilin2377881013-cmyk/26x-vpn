@@ -69,6 +69,16 @@ func (s *server) verifyPassword(encoded, password string) bool {
 func (s *server) routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", s.health)
+	for _, item := range []struct {
+		path string
+		node bool
+	}{
+		{"/api/v1/admin/users/{id}/traffic-limits", false},
+		{"/api/v1/admin/nodes/{code}/traffic-limits", true},
+	} {
+		mux.HandleFunc("GET "+item.path, s.requireAdmin(s.trafficLimits(item.node, false), "owner", "operations"))
+		mux.HandleFunc("PUT "+item.path, s.requireAdmin(s.withCSRF(s.trafficLimits(item.node, true)), "owner", "operations"))
+	}
 	mux.HandleFunc("GET /api/v1/downloads", s.listDownloads)
 	mux.HandleFunc("GET /api/v1/admin/downloads", s.requireAdmin(s.listDownloads, "owner", "operations"))
 	mux.HandleFunc("PUT /api/v1/admin/downloads/{channel}", s.requireAdmin(s.withCSRF(s.saveDownloads), "owner", "operations"))

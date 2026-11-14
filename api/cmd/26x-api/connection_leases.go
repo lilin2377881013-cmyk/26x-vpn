@@ -47,6 +47,22 @@ func (s *server) acquireConnectionLease(w http.ResponseWriter, r *http.Request) 
 		connectionLeaseError(w)
 		return
 	}
+	var quotaAvailable bool
+	err = tx.QueryRowContext(ctx, `SELECT monthly_quota_bytes IS NULL OR (
+		SELECT COALESCE(sum(bytes_up) + sum(bytes_down), 0) < monthly_quota_bytes
+		FROM usage_daily WHERE user_id=$1
+		AND usage_day >= date_trunc('month', now() AT TIME ZONE 'UTC')::date
+		AND usage_day <= (now() AT TIME ZONE 'UTC')::date
+	) FROM users WHERE id=$1`, user.id).Scan(&quotaAvailable)
+	if err != nil {
+		connectionLeaseError(w)
+		return
+	}
+	if !quotaAvailable {
+		writeError(w, http.StatusForbidden, "traffic_quota_exceeded", "本月流量额度已用完")
+		return
+	}
+
 	var validDevice bool
 	err = tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM devices WHERE id = $1 AND user_id = $2 AND revoked_at IS NULL)`,
 		device, user.id).Scan(&validDevice)
@@ -104,6 +120,7 @@ func (s *server) acquireConnectionLease(w http.ResponseWriter, r *http.Request) 
 			AND (endpoint_id IS NULL OR EXISTS (
 				SELECT 1 FROM node_endpoints e JOIN nodes n ON n.id=e.node_id
 				WHERE e.id=connection_leases.endpoint_id AND e.enabled AND n.status IN ('online','degraded')
+				AND node_monthly_quota_available(n.id,n.monthly_quota_bytes)
 			))
 			RETURNING expires_at, endpoint_id::text`, device, user.id, hash[:], int(connectionLeaseLifetime.Seconds()), limit, subscriptionEnd).Scan(&expires, &endpoint)
 		if errors.Is(err, sql.ErrNoRows) {
@@ -168,6 +185,7 @@ func (s *server) acquireConnectionLease(w http.ResponseWriter, r *http.Request) 
 				) load
 				WHERE ($4::uuid IS NULL OR e.id<>$4)
 					AND UPPER(n.region_code)=$2 AND n.status IN ('online','degraded')
+					AND node_monthly_quota_available(n.id,n.monthly_quota_bytes)
 					AND (load.has_user OR n.capacity_limit IS NULL OR load.seats < n.capacity_limit)
 				ORDER BY CASE WHEN n.status='online' THEN 0 ELSE 1 END,
 					load.has_user DESC, load.seats, n.code, e.id LIMIT 1`, device, input.Region, user.id, trialOnlyEndpoint).Scan(&endpoint)

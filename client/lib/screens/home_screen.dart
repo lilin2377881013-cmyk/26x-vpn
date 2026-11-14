@@ -1252,7 +1252,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
                 body: TabBarView(
                   children: [
-                    for (final locked in [false, !premium])
+                    for (final premiumTab in [false, true])
                       ListView(
                         children: [
                           const ColoredBox(
@@ -1272,8 +1272,10 @@ class _HomeScreenState extends State<HomeScreen> {
                             _regionRow(
                               routeContext,
                               region.key,
-                              region.value,
-                              locked: locked,
+                              premiumTab && region.key == 'HK'
+                                  ? '豪华香港专线'
+                                  : region.value,
+                              locked: premiumTab && !premium,
                             ),
                         ],
                       ),

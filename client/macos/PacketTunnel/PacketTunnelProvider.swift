@@ -29,7 +29,8 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         }
         let (config, address) = try self.prepareConfig(xrayJson)
         try self.checkOutbound(config)
-        self.setTunnelNetworkSettings(self.networkSettings(address: address)) { error in
+        let network = try self.networkSettings(address: address)
+        self.setTunnelNetworkSettings(network) { error in
           self.queue.async {
             guard self.generation == generation else { return }
             if error != nil {
@@ -106,17 +107,19 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
     throw tunnelError(1009, "无法解析 VPN 节点地址。")
   }
 
-  private func networkSettings(address: String) -> NEPacketTunnelNetworkSettings {
+  private func networkSettings(address: String) throws -> NEPacketTunnelNetworkSettings {
     let network = NEPacketTunnelNetworkSettings(tunnelRemoteAddress: address)
     let ipv4 = NEIPv4Settings(addresses: [TunnelDNSProbe.sourceAddress], subnetMasks: ["255.255.255.252"])
     ipv4.includedRoutes = [NEIPv4Route.default()]
+    var directRoutes = try directIPv4Routes()
     let ipv6 = NEIPv6Settings(addresses: ["fd26:26::1"], networkPrefixLengths: [126])
     ipv6.includedRoutes = [NEIPv6Route.default()]
     if address.contains(":") {
       ipv6.excludedRoutes = [NEIPv6Route(destinationAddress: address, networkPrefixLength: 128)]
     } else {
-      ipv4.excludedRoutes = [NEIPv4Route(destinationAddress: address, subnetMask: "255.255.255.255")]
+      directRoutes.append(NEIPv4Route(destinationAddress: address, subnetMask: "255.255.255.255"))
     }
+    ipv4.excludedRoutes = directRoutes
     network.ipv4Settings = ipv4
     network.ipv6Settings = ipv6
     let dns = NEDNSSettings(servers: [TunnelDNSProbe.resolverAddress, "2606:4700:4700::1111"])
@@ -124,6 +127,28 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
     network.dnsSettings = dns
     network.mtu = 1500
     return network
+  }
+
+  private func directIPv4Routes() throws -> [NEIPv4Route] {
+    let invalidRoutes = tunnelError(1003, "VPN 的 IPv4 分流列表缺失或无效。")
+    guard let url = Bundle.main.url(forResource: "direct-ipv4-cidrs", withExtension: "txt"),
+          let contents = try? String(contentsOf: url, encoding: .utf8) else {
+      throw invalidRoutes
+    }
+    let lines = contents.split(whereSeparator: \.isNewline)
+    guard !lines.isEmpty else { throw invalidRoutes }
+
+    return try lines.map { line in
+      let parts = line.split(separator: "/", omittingEmptySubsequences: false)
+      var address = in_addr()
+      guard parts.count == 2, let prefix = Int(parts[1]), (1...32).contains(prefix),
+            inet_pton(AF_INET, String(parts[0]), &address) == 1 else {
+        throw invalidRoutes
+      }
+      let mask = UInt32.max << (32 - prefix)
+      let subnetMask = "\(mask >> 24).\((mask >> 16) & 255).\((mask >> 8) & 255).\(mask & 255)"
+      return NEIPv4Route(destinationAddress: String(parts[0]), subnetMask: subnetMask)
+    }
   }
 
   private func checkOutbound(_ config: [String: Any]) throws {

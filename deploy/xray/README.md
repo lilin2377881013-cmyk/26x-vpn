@@ -46,3 +46,39 @@ its previous credential, including after release or expiry. It frees the
 slot after reconciliation confirms removal. Manually configured users
 must be migrated out of the node's static credentials to enforce the
 same limit for those users.
+
+## Hong Kong and Japan egress
+
+[The routing example](hk-split-routing.json.example) sends OpenAI domains from
+the managed VLESS inbound to a Japan VPS. Remaining traffic from that inbound
+uses Hong Kong's own connection. It assumes a dedicated VLESS over TLS
+listener on the Japan VPS with a valid certificate for its hostname.
+
+Replace the example address, port, TLS name and UUID with the Japan listener's
+actual values. Keep the UUID in the deployed config. Add the two outbounds to
+the existing Hong Kong configuration. Add the two rules after any existing
+control or policy rules that must take precedence and before any general
+catch-all rule. Match the managed inbound's actual tag in both rules. Keep
+other inbounds, outbounds and API routing in place.
+
+Enable the following on the managed Hong Kong VLESS inbound so DNS-resolved
+connections can match their HTTP Host or TLS server name. Sniffing only
+supplies a domain for route selection.
+
+```json
+"sniffing": {
+  "enabled": true,
+  "destOverride": ["http", "tls", "quic"],
+  "routeOnly": true
+}
+```
+
+Run `xray run -test -config /path/to/merged.json` before restarting. Then
+compare the IP reported by the ChatGPT or OpenAI trace endpoint with the
+IP reported by a neutral IP-check service through the same client. Keep
+Japan's hostname and TLS certificate consistent. Traffic without an
+observable hostname follows the Hong Kong rule.
+
+The example covers OpenAI-operated domains used for chat, login, API and
+content. Verify any additional service dependencies with
+[OpenAI's network guide](https://help.openai.com/en/articles/9247338-network-recommendations-for-chatgpt-errors-on-web-and-apps).

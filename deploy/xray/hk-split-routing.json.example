@@ -1,0 +1,48 @@
+{
+  "outbounds": [
+    {
+      "tag": "hk-direct",
+      "protocol": "freedom"
+    },
+    {
+      "tag": "jp-openai",
+      "protocol": "vless",
+      "settings": {
+        "address": "jp-vps.example.com",
+        "port": 443,
+        "id": "00000000-0000-4000-8000-000000000000",
+        "encryption": "none"
+      },
+      "streamSettings": {
+        "network": "raw",
+        "security": "tls",
+        "tlsSettings": {
+          "serverName": "jp-vps.example.com"
+        }
+      }
+    }
+  ],
+  "routing": {
+    "domainStrategy": "AsIs",
+    "rules": [
+      {
+        "type": "field",
+        "inboundTag": ["vless-26x"],
+        "domain": [
+          "domain:chatgpt.com",
+          "domain:openai.com",
+          "domain:oaistatic.com",
+          "domain:oaiusercontent.com",
+          "domain:oaistatsig.com",
+          "full:cdn.openaimerge.com"
+        ],
+        "outboundTag": "jp-openai"
+      },
+      {
+        "type": "field",
+        "inboundTag": ["vless-26x"],
+        "outboundTag": "hk-direct"
+      }
+    ]
+  }
+}

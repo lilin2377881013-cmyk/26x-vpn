@@ -74,3 +74,12 @@ API request from that exit returned HTTP 403 with
 `unsupported_country_region_territory`; ChatGPT also returned HTTP 403. The
 tunnel's generic connectivity check does not guarantee access to individual
 services.
+
+## IPv4 split routing
+
+The system extension uses the bundled
+[`direct-ipv4-cidrs.txt`](../../macos/PacketTunnel/direct-ipv4-cidrs.txt)
+snapshot to install 5,491 IPv4 exclusions. Matching destinations use the
+underlying network interface. The provider keeps the VPN endpoint's host
+exception and sets tunnel defaults for all other IPv4 destinations and IPv6.
+The VPN DNS settings and IPv6 routing are unchanged by the IPv4 CIDR list.

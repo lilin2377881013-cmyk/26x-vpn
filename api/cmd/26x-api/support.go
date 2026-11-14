@@ -84,8 +84,13 @@ func supportError(w http.ResponseWriter) {
 	writeError(w, 500, "support_error", "客服服务暂不可用，请稍后重试")
 }
 
+var localTelegramBotToken string
+
 func (s *server) notifySupport(ctx context.Context) {
 	token := strings.TrimSpace(os.Getenv("TELEGRAM_BOT_TOKEN"))
+	if token == "" {
+		token = localTelegramBotToken
+	}
 	chat := strings.TrimSpace(os.Getenv("TELEGRAM_SUPPORT_CHAT_ID"))
 	if token == "" || chat == "" {
 		return
@@ -98,17 +103,17 @@ func (s *server) notifySupport(ctx context.Context) {
 			return
 		}
 		for i := 0; i < 10; i++ {
-			var id string
+			var id, message string
 			err := s.db.QueryRowContext(ctx, `UPDATE support_tickets SET notify_after=now()+interval '5 minutes'
 				WHERE id=(SELECT id FROM support_tickets WHERE notified_at IS NULL AND notify_after<=now()
-				ORDER BY notify_after LIMIT 1 FOR UPDATE SKIP LOCKED) RETURNING id::text`).Scan(&id)
+				ORDER BY notify_after LIMIT 1 FOR UPDATE SKIP LOCKED) RETURNING id::text,message`).Scan(&id, &message)
 			if err != nil {
 				if !errors.Is(err, sql.ErrNoRows) && ctx.Err() == nil {
 					s.logger.Warn("support notification queue unavailable")
 				}
 				break
 			}
-			body, _ := json.Marshal(map[string]string{"chat_id": chat, "text": "26x 收到客服留言\n工单号 " + id + "\nhttps://26xvpn.com/admin/support"})
+			body, _ := json.Marshal(map[string]string{"chat_id": chat, "text": "26x 收到客服留言\n工单号 " + id + "\n\n" + message + "\n\nhttps://26xvpn.com/admin/support"})
 			req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.telegram.org/bot"+token+"/sendMessage", bytes.NewReader(body))
 			if err != nil {
 				s.logger.Warn("invalid Telegram configuration")

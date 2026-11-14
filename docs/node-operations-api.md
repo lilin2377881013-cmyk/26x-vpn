@@ -143,6 +143,5 @@ can submit messages to `POST /api/v1/me/support`. The admin inbox at
 
 To enable Telegram alerts, create a bot via BotFather, start a private chat
 with it, and set `TELEGRAM_BOT_TOKEN` and `TELEGRAM_SUPPORT_CHAT_ID` in
-the server-side API environment. Restart the API. Alerts contain the ticket
-ID and admin inbox link. The API saves messages before notification, and
+the server-side API environment. Restart the API. Alerts contain the ticket ID, message body and admin inbox link. The API saves messages before notification, and
 retries unsuccessful alerts from the database queue.

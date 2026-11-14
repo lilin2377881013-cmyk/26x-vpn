@@ -34,3 +34,5 @@ work/
 **/*.pem
 **/*.key
 **/*.p8
+
+/api/cmd/26x-api/support_local.go

@@ -1697,7 +1697,7 @@ class _SupportPageState extends State<_SupportPage> {
                 ),
               ] else ...[
                 const Text(
-                  '请描述遇到的问题。请勿填写密码或支付信息。',
+                  '留言正文会转发到 26x 的 Telegram 客服。请勿填写密码或支付信息。',
                   style: TextStyle(color: _HomeScreenState._muted),
                 ),
                 const SizedBox(height: 16),

@@ -177,7 +177,7 @@ func (s *server) acquireConnectionLease(w http.ResponseWriter, r *http.Request) 
 				JOIN device_node_credentials c ON c.endpoint_id=e.id AND c.device_id=$1
 					AND c.status='active' AND c.revoked_at IS NULL
 				CROSS JOIN LATERAL (
-					SELECT count(DISTINCT l.user_id) AS seats,
+					SELECT count(DISTINCT l.user_id) AS seats, count(*) AS connections,
 						COALESCE(bool_or(l.user_id = $3), false) AS has_user
 					FROM connection_leases l
 					JOIN node_endpoints le ON le.id=l.endpoint_id
@@ -188,7 +188,7 @@ func (s *server) acquireConnectionLease(w http.ResponseWriter, r *http.Request) 
 					AND node_monthly_quota_available(n.id,n.monthly_quota_bytes)
 					AND (load.has_user OR n.capacity_limit IS NULL OR load.seats < n.capacity_limit)
 				ORDER BY CASE WHEN n.status='online' THEN 0 ELSE 1 END,
-					load.has_user DESC, load.seats, n.code, e.id LIMIT 1`, device, input.Region, user.id, trialOnlyEndpoint).Scan(&endpoint)
+					load.seats, load.connections, load.has_user DESC, n.code, e.id LIMIT 1`, device, input.Region, user.id, trialOnlyEndpoint).Scan(&endpoint)
 			if errors.Is(err, sql.ErrNoRows) {
 				writeError(w, http.StatusConflict, "region_unavailable", "No server in this region has space and an active device credential")
 				return

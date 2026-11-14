@@ -72,7 +72,8 @@ Migration 008 records the selected endpoint on each regional connection
 lease. The client shows one entry per supported region. On connect it sends
 `region` with the lease request, and the API returns `endpointId`. The API
 selects an enabled endpoint with an active credential for that device,
-prefers healthy servers, and allocates capacity transactionally. Each
+prefers healthy servers, then fewer active accounts and connections, and
+allocates capacity transactionally. Each
 physical server's `capacity_limit` counts distinct accounts with live
 leases across its endpoints. Two devices from one account on the same
 server use one seat. A blank limit is unlimited. Renewal keeps the same

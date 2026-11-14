@@ -31,6 +31,16 @@ The executable defaults to `/opt/26x-node/bin/26x-node`, overridable via
 `NODE_COMMAND`. The API runs it as its system user and passes arguments
 directly. No shell interprets the arguments.
 
+On the systemd deployment, the executable and its dependencies must be
+readable by the API service user. If the script writes its vault and logs
+under `/opt/26x-node`, create those directories with the appropriate service
+ownership and grant write access in a service drop-in:
+
+```ini
+[Service]
+ReadWritePaths=/opt/26x-node/state /opt/26x-node/logs
+```
+
 - Deployment JSON accepts `code`, `name`, `region_code`, `host`,
   `ssh_port`, `ssh_user`, `ssh_password`, `capacity_limit` and `port`.
   The command is `add --code CODE --name NAME --region REGION --host HOST --ssh-pass PASSWORD --capacity COUNT --json`.

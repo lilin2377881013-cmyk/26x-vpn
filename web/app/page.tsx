@@ -60,7 +60,7 @@ export default async function HomePage() {
                   return <div className="download-option" key={id}>
                     {address ? <a className="button" href={address}>{label}</a>
                       : <button className="button" type="button" disabled>{label}</button>}
-                    {store && <span className="download-tax">因税贵10%</span>}
+                    {store && <span className="download-tax">商店税贵10%</span>}
                   </div>;
                 })}
               </div>

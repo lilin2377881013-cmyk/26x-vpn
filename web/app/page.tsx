@@ -39,11 +39,11 @@ export default async function HomePage() {
         <div className="hero-copy">
           <div className="eyebrow">26x VPN</div>
           <h1>一键连接<br /><em>随时切换地区</em></h1>
-          <p className="hero-lede">从香港、日本、新加坡和美国选择线路。国内 IPv4 地址按客户端规则直连，其余 IPv4 流量默认走 VPN 隧道。</p>
+          <p className="hero-lede">在客户端选择并切换线路。国内 IPv4 地址按客户端规则直连，其余 IPv4 流量默认走 VPN 隧道。</p>
           <div className="hero-actions"><a className="button" href="#downloads">下载 26x <span aria-hidden="true">↓</span></a><a className="text-link" href="/support">获取帮助 →</a></div>
         </div>
         <div className="app-preview" aria-hidden="true">
-          <span>26x</span><div className="app-preview-power">⏻</div><div className="app-preview-region">🇭🇰 香港 <span>›</span></div>
+          <span>26x</span><div className="app-preview-power">⏻</div><div className="app-preview-region">选择线路 <span>›</span></div>
         </div>
       </section>
       <section className="section wrap" id="downloads">
@@ -62,18 +62,7 @@ export default async function HomePage() {
           ))}
         </div>
       </section>
-      <section className="release-band" id="features">
-       <div className="section wrap">
-        <div className="section-heading">
-          <div><h2>四个地区，<em>随时切换</em></h2></div>
-          <p>连接后可直接在客户端切换线路。</p>
-        </div>
-        <ul className="region-grid" aria-label="可选线路">
-          <li>🇭🇰 香港</li><li>🇯🇵 日本</li><li>🇸🇬 新加坡</li><li>🇺🇸 美国</li>
-        </ul>
-       </div>
-      </section>
-      <section className="section wrap">
+      <section className="section wrap" id="features">
         <div className="section-heading"><div><h2>连接和设备，<em>一处管理</em></h2></div></div>
         <div className="feature-grid">
           <article className="feature-card"><h3>一键连接</h3><p>随时查看 VPN 状态，连接中也可以直接切换地区。</p></article>

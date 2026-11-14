@@ -3,7 +3,7 @@ import Link from "next/link";
 const sections = [
   { title: "工作台", links: [["概览", "/admin"]] },
   { title: "资源管理", links: [["节点管理", "/admin/nodes"], ["用户管理", "/admin?tab=用户"], ["设备管理", "/admin?tab=设备"], ["套餐管理", "/admin?tab=套餐"]] },
-  { title: "运营支持", links: [["用户流量", "/admin/users"], ["客服留言", "/admin/support"], ["审计记录", "/admin?tab=审计记录"]] },
+  { title: "运营支持", links: [["用户流量", "/admin/users"], ["客服留言", "/admin/support"], ["下载管理", "/admin/downloads"], ["审计记录", "/admin?tab=审计记录"]] },
 ];
 
 export function AdminNav({ current, footer, demo = false }: { current: string; footer?: React.ReactNode; demo?: boolean }) {

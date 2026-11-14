@@ -269,3 +269,39 @@ export function SupportInbox() {
     }
   </Page>;
 }
+
+const channels = [["ios-tf", "iPhone · TestFlight"], ["ios-store", "iPhone · App Store"], ["macos", "macOS"], ["windows", "Windows"], ["android", "Android"]];
+
+function DownloadForm({ channel, label, initial }: { channel: string; label: string; initial: string }) {
+  const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState("");
+  async function save(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const url = new FormData(event.currentTarget).get("url");
+    setBusy(true);
+    setStatus("");
+    try {
+      await write("/downloads/" + channel, "PUT", { url });
+      setStatus(url ? "已发布到官网" : "已隐藏下载入口");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "保存失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+  return <form className={styles.card + " admin-form"} onSubmit={save}>
+    <label>{label}<input name="url" type="url" maxLength={2048} defaultValue={initial} placeholder="https://" /></label>
+    <div><button className="primary-action" disabled={busy}>{busy ? "保存中…" : "保存地址"}</button></div>
+    {status && <p role="status">{status}</p>}
+  </form>;
+}
+
+export function DownloadSettings() {
+  const { data, error } = useData<{ links: Record<string, string> }>("/downloads");
+  return <Page title="下载管理">
+    <p>留空并保存即可隐藏对应的下载入口。iPhone 优先显示 TestFlight。</p>
+    {error ? <ErrorMessage message={error} /> : !data ? <p>正在加载下载地址…</p> : channels.map(([channel, label]) =>
+      <DownloadForm key={channel} channel={channel} label={label} initial={data.links[channel] ?? ""} />
+    )}
+  </Page>;
+}

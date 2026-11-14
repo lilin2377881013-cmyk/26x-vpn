@@ -69,6 +69,9 @@ func (s *server) verifyPassword(encoded, password string) bool {
 func (s *server) routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", s.health)
+	mux.HandleFunc("GET /api/v1/downloads", s.listDownloads)
+	mux.HandleFunc("GET /api/v1/admin/downloads", s.requireAdmin(s.listDownloads, "owner", "operations"))
+	mux.HandleFunc("PUT /api/v1/admin/downloads/{channel}", s.requireAdmin(s.withCSRF(s.saveDownloads), "owner", "operations"))
 	mux.HandleFunc("POST /api/v1/auth/session", s.userLogin)
 	mux.HandleFunc("POST /api/v1/auth/trial", s.startTrial)
 	mux.HandleFunc("POST /api/v1/me/checkout", s.requireUser(s.withUserCSRF(s.checkout)))

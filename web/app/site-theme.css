@@ -60,3 +60,65 @@
 @media (prefers-reduced-motion: reduce) {
   .site-shell .button { transition: none; }
 }
+
+.final-site .hero { gap: clamp(20px, 6vw, 84px); min-height: 490px; }
+.final-site .hero h1 { font-size: clamp(40px, 6vw, 70px); }
+.final-site .app-preview {
+  min-height: 325px;
+  width: min(100%, 460px);
+  justify-self: center;
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  gap: 24px;
+  border: 1px solid var(--line);
+  border-radius: 24px;
+  color: var(--ink);
+  background: radial-gradient(ellipse at 50% 28%, #2d4149, #151922 72%);
+  box-shadow: 0 24px 56px #0c10184d;
+}
+.app-preview > span { font-size: 23px; font-weight: 800; }
+.app-preview-power {
+  display: grid;
+  place-items: center;
+  width: 112px;
+  aspect-ratio: 1;
+  border: 2px solid var(--teal);
+  border-radius: 50%;
+  color: var(--teal);
+  background: #203c3d;
+  font-size: 45px;
+}
+.app-preview-region {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  border: 1px solid var(--line);
+  border-radius: 24px;
+  padding: 9px 18px;
+  background: var(--panel);
+}
+.final-site .section { padding-block: 64px; }
+.download-grid { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 16px; }
+.download-card {
+  min-width: 0;
+  padding: 20px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--panel);
+}
+.download-card h3 { margin: 14px 0; font-size: 20px; }
+.platform-mark { color: var(--gold); font-weight: 700; }
+.download-actions { display: grid; gap: 10px; }
+.download-pending, .download-note { color: var(--muted); font-size: 13px; line-height: 1.6; }
+.download-note { margin-bottom: 0; }
+.final-site .download-secondary { background: #394457; color: var(--ink); }
+.final-site .download-secondary:hover { background: #46536a; }
+.final-site .feature-card { min-height: 130px; }
+@media (max-width: 900px) { .download-grid { grid-template-columns: repeat(2,minmax(0,1fr)); } }
+@media (max-width: 650px) {
+  .final-site .hero { min-height: auto; padding-bottom: 32px; }
+  .final-site .app-preview { margin: 32px auto 0; min-height: 270px; }
+  .final-site .section { padding-block: 44px; }
+}
+@media (max-width: 420px) { .download-grid { grid-template-columns: 1fr; } }

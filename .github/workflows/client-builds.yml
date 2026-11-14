@@ -1,0 +1,67 @@
+name: Windows and iOS client builds
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'client/**'
+      - '.github/workflows/client-builds.yml'
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.3'
+          cache: false
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.50.0'
+          channel: stable
+      - name: Build Windows tunnel
+        shell: bash
+        run: |
+          curl --fail --location --retry 3 --output wintun.zip https://www.wintun.net/builds/wintun-0.14.1.zip
+          echo '07c256185d6ee3652e09fa55c0b673e2624b565e02c4b9091c79ca7d2f24ef51  wintun.zip' | sha256sum --check
+          unzip -q wintun.zip
+          bash client/scripts/build_windows_tunnel.sh amd64 wintun/bin/amd64/wintun.dll
+      - name: Build Windows client
+        working-directory: client
+        run: flutter build windows --release --dart-define=API_BASE_URL=https://26xvpn.com
+      - name: Include Wintun license
+        shell: bash
+        run: cp wintun/LICENSE.txt client/build/windows/x64/runner/Release/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: 26x-Windows-x64
+          path: client/build/windows/x64/runner/Release/
+          if-no-files-found: error
+  ios:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.3'
+          cache: false
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.50.0'
+          channel: stable
+      - name: Build iOS tunnel
+        run: bash client/scripts/build_libxray.sh ios
+      - name: Build iPhone app and bundle the unsigned IPA
+        working-directory: client
+        run: |
+          flutter build ios --release --no-codesign --dart-define=API_BASE_URL=https://26xvpn.com
+          mkdir -p build/ios/Payload
+          mv build/ios/iphoneos/Runner.app build/ios/Payload/
+          cd build/ios
+          zip -qr 26x-iOS-unsigned.ipa Payload
+      - uses: actions/upload-artifact@v4
+        with:
+          name: 26x-iOS-unsigned
+          path: client/build/ios/26x-iOS-unsigned.ipa
+          if-no-files-found: error

@@ -1,5 +1,6 @@
 "use client";
 
+import { deviceSystemLabel } from "./device-system";
 import { FormEvent, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { AdminNav } from "./admin-nav";
@@ -7,7 +8,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 
 type Tab = "概览" | "用户" | "设备" | "节点" | "套餐" | "审计记录";
 type UserRow = { id: string; email: string; status: string; activeDevices: number; planName: string | null; subscriptionEndsAt: string | null };
-type DeviceRow = { id: string; userId: string; email: string; platform: string; label: string; appVersion: string | null; lastSeenAt: string | null; createdAt: string; revokedAt: string | null };
+type DeviceRow = { id: string; userId: string; email: string; platform: string; osName?: string | null; osVersion?: string | null; label: string; appVersion: string | null; lastSeenAt: string | null; createdAt: string; revokedAt: string | null };
 type Endpoint = { id: string; protocol: string; host: string; port: number; transport: string; serverName: string | null; publicKey: string | null; shortId: string | null; enabled?: boolean };
 type NodeRow = { id: string; code: string; name: string; region: string; status: string; healthCheckedAt?: string | null; endpoints: Endpoint[] };
 type PlanRow = { id: string; code: string; name: string; tier: "standard" | "premium"; durationDays: number; priceCents: number | null; currency: string; quotaBytes: number | null; maxDevices: number; active: boolean };
@@ -281,7 +282,7 @@ function UserTable({ rows, onChangeStatus, onAssignPlan }: { rows: UserRow[]; on
 }
 
 function DeviceTable({ rows, onRevoke }: { rows: DeviceRow[]; onRevoke: (device: DeviceRow) => void }) {
-  return <div className="data-table device-table"><div className="table-head"><span>设备</span><span>账户</span><span>平台</span><span>最近在线</span><span>登记时间</span><span>状态 / 操作</span></div>{rows.map((device) => <div className="user-row device-row" key={device.id}><div className="table-user"><span>▣</span><div><strong>{device.label}</strong><small>{device.id.slice(0, 12)}… · {device.appVersion ?? "版本未知"}</small></div></div><span>{device.email}</span><span>{platformLabel(device.platform)}</span><span>{device.lastSeenAt ? formatTime(device.lastSeenAt) : "从未"}</span><span>{formatDate(device.createdAt)}</span><span className="device-actions"><span className={device.revokedAt ? "user-status suspended" : "user-status"}><i />{device.revokedAt ? "已撤销" : "有效"}</span>{!device.revokedAt && <button className="row-menu" onClick={() => onRevoke(device)}>撤销</button>}</span></div>)}{rows.length === 0 && <div className="table-empty">还没有登记设备</div>}</div>;
+  return <div className="data-table device-table"><div className="table-head"><span>设备</span><span>账户</span><span>操作系统</span><span>最近在线</span><span>登记时间</span><span>状态 / 操作</span></div>{rows.map((device) => <div className="user-row device-row" key={device.id}><div className="table-user"><span>▣</span><div><strong>{device.label}</strong><small>{device.id.slice(0, 12)}… · {device.appVersion ?? "版本未知"}</small></div></div><span>{device.email}</span><span>{deviceSystemLabel(device)}</span><span>{device.lastSeenAt ? formatTime(device.lastSeenAt) : "从未"}</span><span>{formatDate(device.createdAt)}</span><span className="device-actions"><span className={device.revokedAt ? "user-status suspended" : "user-status"}><i />{device.revokedAt ? "已撤销" : "有效"}</span>{!device.revokedAt && <button className="row-menu" onClick={() => onRevoke(device)}>撤销</button>}</span></div>)}{rows.length === 0 && <div className="table-empty">还没有登记设备</div>}</div>;
 }
 
 function NodeTable({ nodes }: { nodes: NodeRow[] }) {
@@ -313,7 +314,6 @@ function FormActions({ onCancel, submit }: { onCancel: () => void; submit: strin
 }
 
 function protocolLabel(protocol: string) { return protocol === "hysteria2" ? "Hysteria2" : protocol === "vless_reality" ? "VLESS REALITY" : protocol; }
-function platformLabel(platform: string) { return ({ ios: "iOS", macos: "macOS", windows: "Windows", android: "Android" } as Record<string, string>)[platform] ?? platform; }
 function statusLabel(status: string) { return status === "online" ? "在线" : status === "degraded" ? "降级" : status === "offline" ? "离线" : status === "provisioning" ? "待配置" : "停用"; }
 function actionLabel(action: string) { return ({ "node.created": "节点已登记", "node.enabled_changed": "节点启停状态已更新", "user.created": "账户已创建", "user.status_changed": "账户状态已更新", "subscription.assigned": "已分配套餐", "plan.created": "套餐已创建", "device.revoked": "设备已撤销" } as Record<string, string>)[action] ?? action; }
 function formatDate(value: string) { return new Intl.DateTimeFormat("zh-CN", { year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(value)); }

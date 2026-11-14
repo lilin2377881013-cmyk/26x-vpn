@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:math';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import '../models.dart';
@@ -237,7 +238,27 @@ class ApiClient {
     );
     _localDeviceId = device.id;
     await _secureStorage.write(key: _deviceIdKey, value: device.id);
+    await syncDeviceSystem(device.id);
     return device;
+  }
+
+  Future<void> syncDeviceSystem(String deviceId) async {
+    if (!Platform.isIOS) return;
+    try {
+      const channel = MethodChannel('26x/tunnel');
+      final system = await channel.invokeMapMethod<String, String>(
+        'deviceSystem',
+      );
+      if (system == null) return;
+      await _request(
+        'PUT',
+        '/api/v1/me/devices/${Uri.encodeComponent(deviceId)}/system',
+        csrf: true,
+        body: system,
+      );
+    } on Exception {
+      // Device reporting can retry on the next session without blocking VPN use.
+    }
   }
 
   Future<String?> localDeviceId() async {

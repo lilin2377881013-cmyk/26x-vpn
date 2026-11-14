@@ -151,6 +151,8 @@ class _HomeScreenState extends State<HomeScreen> {
         break;
       }
     }
+    final device = _device;
+    if (device != null) unawaited(widget.api.syncDeviceSystem(device.id));
     final trialExpired =
         _account?.trialCode != null &&
         _account?.subscriptionEndsAt?.isAfter(DateTime.now()) != true;

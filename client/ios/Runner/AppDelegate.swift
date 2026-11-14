@@ -30,6 +30,10 @@ private final class TunnelBridgePlugin: NSObject, FlutterPlugin, FlutterStreamHa
 
   func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
     switch call.method {
+    case "deviceSystem":
+      let device = UIDevice.current
+      result(["osName": device.userInterfaceIdiom == .pad ? "iPadOS" : "iOS",
+              "osVersion": device.systemVersion])
     case "status":
       load { _ in result(self.snapshot()) }
     case "connect":

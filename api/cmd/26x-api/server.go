@@ -92,6 +92,7 @@ func (s *server) routes() http.Handler {
 	mux.HandleFunc("GET /api/v1/me/plans", s.requireUser(s.listAvailablePlans))
 	mux.HandleFunc("GET /api/v1/me/devices", s.requireUser(s.listMyDevices))
 	mux.HandleFunc("POST /api/v1/me/devices", s.requireUser(s.withUserCSRF(s.registerDevice)))
+	mux.HandleFunc("PUT /api/v1/me/devices/{id}/system", s.requireUser(s.withUserCSRF(s.updateDeviceSystem)))
 	mux.HandleFunc("DELETE /api/v1/me/devices/{id}", s.requireUser(s.withUserCSRF(s.revokeDevice)))
 	mux.HandleFunc("GET /api/v1/client/bootstrap", s.requireUser(s.clientBootstrap))
 	mux.HandleFunc("GET /api/v1/nodes", s.requireUser(s.clientBootstrap))
@@ -889,10 +890,16 @@ func (s *server) changeUserStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) listDevices(w http.ResponseWriter, r *http.Request) {
+	userID := r.URL.Query().Get("userId")
+	if userID != "" && !uuidPattern.MatchString(userID) {
+		writeError(w, http.StatusBadRequest, "invalid_user", "User ID must be a UUID")
+		return
+	}
 	rows, err := s.db.QueryContext(r.Context(), `SELECT d.id::text, d.user_id::text, u.email::text, d.platform, d.label,
-		d.app_version, d.core_version, d.last_seen_at, d.created_at, d.revoked_at
+		d.app_version, d.core_version, d.last_seen_at, d.created_at, d.revoked_at, d.ios_system, d.ios_version
 		FROM devices d JOIN users u ON u.id = d.user_id
-		ORDER BY d.created_at DESC LIMIT 200`)
+		WHERE (NULLIF($1, '')::uuid IS NULL OR d.user_id=NULLIF($1, '')::uuid)
+		ORDER BY d.created_at DESC LIMIT 200`, userID)
 	if err != nil {
 		s.logger.Error("list devices", "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Unable to read devices")
@@ -902,16 +909,16 @@ func (s *server) listDevices(w http.ResponseWriter, r *http.Request) {
 	items := make([]map[string]any, 0)
 	for rows.Next() {
 		var id, userID, email, platform, label string
-		var appVersion, coreVersion sql.NullString
+		var appVersion, coreVersion, osName, osVersion sql.NullString
 		var lastSeen, revoked sql.NullTime
 		var created time.Time
-		if err := rows.Scan(&id, &userID, &email, &platform, &label, &appVersion, &coreVersion, &lastSeen, &created, &revoked); err != nil {
+		if err := rows.Scan(&id, &userID, &email, &platform, &label, &appVersion, &coreVersion, &lastSeen, &created, &revoked, &osName, &osVersion); err != nil {
 			writeError(w, http.StatusInternalServerError, "internal_error", "Unable to read devices")
 			return
 		}
 		items = append(items, map[string]any{
 			"id": id, "userId": userID, "email": email, "platform": platform, "label": label,
-			"appVersion": nullableString(appVersion), "coreVersion": nullableString(coreVersion),
+			"osName": nullableString(osName), "osVersion": nullableString(osVersion), "appVersion": nullableString(appVersion), "coreVersion": nullableString(coreVersion),
 			"lastSeenAt": nullableTime(lastSeen), "createdAt": created.UTC().Format(time.RFC3339), "revokedAt": nullableTime(revoked),
 		})
 	}

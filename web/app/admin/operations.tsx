@@ -1,5 +1,6 @@
 "use client";
 
+import { deviceSystemLabel } from "./device-system";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { FormEvent, ReactNode, useEffect, useState } from "react";
@@ -290,6 +291,9 @@ export function UserList() {
 
 export function UserDetail({ id }: { id: string }) {
   const { data, error } = useData<Usage>(`/users/${encodeURIComponent(id)}/usage`);
+  const devices = useData<{ items: { id: string; label: string; platform: string; osName?: string | null; osVersion?: string | null }[] }>(
+    `/devices?userId=${encodeURIComponent(id)}`,
+  );
   return <Page title={data?.user.email ?? "用户详情"}>
     {error ? <ErrorMessage message={error} /> : data ? <section className={styles.card}>
       <p>{data.user.status} · {data.user.id}</p>
@@ -297,6 +301,14 @@ export function UserDetail({ id }: { id: string }) {
       <p>上传 {gigabytes(data.bytes_up)} GB · 下载 {gigabytes(data.bytes_down)} GB</p>
       <UsageChart daily={data.daily} />
     </section> : <p>正在加载流量…</p>}
+    {data && <section className={styles.card}>
+      <h2>设备操作系统</h2>
+      {devices.error ? <ErrorMessage message={devices.error} /> : !devices.data ? <p>正在加载设备…</p> :
+        devices.data.items.length === 0 ? <p>暂无登记设备。</p> :
+          <table><thead><tr><th>设备</th><th>操作系统</th></tr></thead><tbody>
+            {devices.data.items.map((device) => <tr key={device.id}><td>{device.label}</td><td>{deviceSystemLabel(device)}</td></tr>)}
+          </tbody></table>}
+    </section>}
     {data && <TrafficLimitsForm key={id} path={`/users/${encodeURIComponent(id)}/traffic-limits`} user />}
   </Page>;
 }

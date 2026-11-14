@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import "./refinements.css";
+import "./site-theme.css";
 
 export const metadata: Metadata = {
   title: { default: "26x VPN — 连接，自有节奏", template: "%s | 26x VPN" },

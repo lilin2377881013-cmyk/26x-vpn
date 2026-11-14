@@ -1,0 +1,62 @@
+/* Public homepage palette shared with the 26x client. */
+.site-shell {
+  --paper: #191d27;
+  --panel: #242938;
+  --ink: #e2eaf4;
+  --muted: #afbbcb;
+  --line: #435064;
+  --teal: #71dbc3;
+  --gold: #f0ca87;
+  color-scheme: dark;
+  color: var(--ink);
+  background: radial-gradient(ellipse at 76% 10%, #273542, transparent 32%), var(--paper);
+}
+.site-shell .topbar,
+.site-shell .feature-grid,
+.site-shell .feature-card,
+.site-shell .faq-list details,
+.site-shell .footer-main,
+.site-shell .platform-row,
+.site-shell .platform-list { border-color: var(--line); }
+.site-shell .brand-mark { color: var(--ink); }
+.site-shell .brand-x,
+.site-shell :is(.hero, .section-heading, .platform-copy) h1 em,
+.site-shell :is(.section-heading, .platform-copy) h2 em,
+.site-shell :is(.tiny-lock, .platform-icon, .platform-arrow, .feature-card > a, .faq-list summary span) { color: var(--teal); }
+.site-shell :is(.brand-domain, .nav-links, .eyebrow, .hero-lede, .hero-footnote, .section-heading p, .feature-card p, .feature-card > span, .platform-copy p, .platform-row small, .platform-status, .platform-disclaimer, .faq-title > p, .faq-list p, .footer-links, .footer-main > p, .footer-meta, .proof-inner, .art-coord) { color: var(--muted); }
+.site-shell :is(.text-link, .nav-links a:hover, .footer-links a:hover) { color: var(--teal); }
+.site-shell .button { background: var(--teal); color: #122a29; border-radius: 12px; }
+.site-shell .button:hover { background: #a0eedc; }
+.site-shell .button-light { background: var(--gold); color: #292115; }
+.site-shell .button-light:hover { background: #ffdfa7; }
+.site-shell .status-dot { background: var(--gold); box-shadow: 0 0 0 4px #f0ca8726; }
+.site-shell .proof-band,
+.site-shell .closing-band,
+.site-shell .footer { background: #202631; border-color: var(--line); }
+.site-shell .proof-inner div { color: var(--ink); }
+.site-shell .platform-section { background: var(--panel); }
+.site-shell .feature-icon { background: #294541; color: var(--teal); }
+.site-shell .hero-art { background: radial-gradient(ellipse at 55% 52%, #395754 0, transparent 67%); }
+.site-shell .orb-back { background: linear-gradient(140deg, #263e49, #30514f 52%, #5b9d91); }
+.site-shell .orb-front {
+  background: radial-gradient(circle at 32% 26%, #557c76, #35575b 42%, #202d3a 82%);
+  box-shadow: inset 0 0 0 2px #71dbc39c, inset -20px -20px 45px #17233280;
+}
+.site-shell .orbit { border-color: #71dbc34a; }
+.site-shell .orbit-two { border-color: #71dbc333; }
+.site-shell .node,
+.site-shell .signal-card { background: #242938f2; border: 1px solid var(--line); color: var(--ink); }
+.site-shell .hero-art .node i { background: var(--teal); }
+.site-shell :is(.signal-top, .signal-bottom) { color: var(--muted); }
+.site-shell .signal-top b,
+.site-shell .signal-bottom strong { color: var(--gold); }
+.site-shell .route-preview i { background: var(--teal); }
+.site-shell .route-preview :is(.route-device, .route-core, .route-node) { color: var(--teal); background: #294541; border-color: #547973; }
+.site-shell :is(a, summary):focus-visible { outline: 2px solid var(--gold); outline-offset: 4px; }
+
+@media (max-width: 650px) {
+  .site-shell .hero-actions { flex-wrap: wrap; gap: 16px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .site-shell .button { transition: none; }
+}

@@ -27,16 +27,22 @@ for inbound in config["inbounds"]:
 Path(target).write_text(json.dumps(config, indent=2))
 PY
 "$candidate" run -test -config "$backup/config.next.json"
-install -o "$(stat -c %u "$config")" -g "$(stat -c %g "$config")" -m "$(stat -c %a "$config")" "$backup/config.next.json" "$config.next.json"
-mv "$config.next.json" "$config"
+install_config() {
+    install -o "$(stat -c %u "$config")" -g "$(stat -c %g "$config")" -m "$(stat -c %a "$config")" "$1" "$config.next.json"
+    mv "$config.next.json" "$config"
+}
+install_config "$backup/config.next.json"
 install -m 755 "$candidate" "$binary.next"
 mv "$binary.next" "$binary"
 if systemctl restart xray && sleep 1 && systemctl is-active --quiet xray &&
    "$binary" api statsquery --server=127.0.0.1:10085 -pattern user >/dev/null; then
+    # Keep runtime-issued credentials out of the persistent Xray config.
+    install_config "$backup/config.json"
     echo "Xray running; backup: $backup"
     exit 0
 fi
-cp -p "$backup/config.json" "$config"
-cp -p "$backup/xray" "$binary"
+install -m 755 "$backup/xray" "$binary.next"
+mv "$binary.next" "$binary"
 systemctl restart xray
+install_config "$backup/config.json"
 exit 1

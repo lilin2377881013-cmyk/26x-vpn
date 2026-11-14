@@ -302,12 +302,15 @@ class ApiClient {
   }
 
   Future<void> releaseConnection(ConnectionLease lease) async {
-    await _request(
+    final response = await _request(
       'DELETE',
       '/api/v1/me/devices/${Uri.encodeComponent(lease.deviceId)}/connection-lease',
       csrf: true,
       body: {'token': lease.token},
     );
+    if (response.statusCode != HttpStatus.noContent) {
+      throw const ApiException('无法释放上次连接名额，请重试。');
+    }
   }
 
   Future<void> signOut() async {

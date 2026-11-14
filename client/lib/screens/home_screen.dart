@@ -26,7 +26,7 @@ class _HomeScreenState extends State<HomeScreen> {
   ConnectionLease? _lease;
   Timer? _renewal;
   Timer? _leaseExpiry;
-  Future<void>? _releaseInFlight;
+  Future<bool>? _releaseInFlight;
   bool _leaseInvalid = false;
   Account? _account;
   List<Device> _devices = [];
@@ -1071,9 +1071,18 @@ class _HomeScreenState extends State<HomeScreen> {
       padding: const EdgeInsets.only(bottom: 9),
       child: InkWell(
         borderRadius: BorderRadius.circular(15),
-        onTap: _busy || _isConnecting || _isConnected
+        onTap:
+            _busy ||
+                _isConnecting ||
+                (_isConnected && (selected || !node.connectable))
             ? null
-            : () => setState(() => _selectedNode = node),
+            : () {
+                if (_isConnected) {
+                  unawaited(_connectTo(node, switchRegion: true));
+                } else {
+                  setState(() => _selectedNode = node);
+                }
+              },
         child: Container(
           padding: const EdgeInsets.all(13),
           decoration: BoxDecoration(
@@ -1126,14 +1135,43 @@ class _HomeScreenState extends State<HomeScreen> {
       }
       return;
     }
-    final requested = _selectedNode;
+    await _connectTo(_selectedNode);
+  }
+
+  Future<void> _connectTo(
+    VpnNode? requested, {
+    bool switchRegion = false,
+  }) async {
+    if (_busy) return;
     final device = _device;
     if (requested == null || device == null) {
       setState(() => _message = '当前没有可连接节点。');
       return;
     }
-    setState(() => _busy = true);
+    setState(() {
+      _busy = true;
+      _message = null;
+    });
     try {
+      if (switchRegion) {
+        final disconnected = widget.tunnel.changes
+            .firstWhere(
+              (state) =>
+                  state.state == TunnelState.disconnected ||
+                  state.state == TunnelState.error ||
+                  state.state == TunnelState.unavailable,
+            )
+            .timeout(const Duration(seconds: 20));
+        await Future.wait([
+          widget.tunnel.disconnect().timeout(const Duration(seconds: 20)),
+          disconnected,
+        ]);
+        if (widget.tunnel.current.state != TunnelState.disconnected) {
+          throw const ApiException('未能断开当前地区，请稍后再试。');
+        }
+        if (!mounted) return;
+        _selectedNode = requested;
+      }
       await _loadNodes();
       final region = _regionCode(requested);
       final regional =
@@ -1157,7 +1195,9 @@ class _HomeScreenState extends State<HomeScreen> {
         return;
       }
       if (requiresLease) {
-        await (_releaseInFlight ?? Future<void>.value());
+        if (!await _releaseLease()) {
+          throw const ApiException('上次连接名额尚未释放，请稍后重试。');
+        }
         final clock = Stopwatch()..start();
         final lease = await widget.api.reserveConnection(
           device.id,
@@ -1204,8 +1244,13 @@ class _HomeScreenState extends State<HomeScreen> {
       if (widget.tunnel.current.state != TunnelState.connected) {
         await _releaseLease();
       }
+    } on TimeoutException {
+      if (mounted) setState(() => _message = '等待 VPN 断开超时，请稍后重试。');
     } catch (error) {
-      await _releaseLease();
+      if (widget.tunnel.current.state != TunnelState.connected &&
+          widget.tunnel.current.state != TunnelState.disconnecting) {
+        await _releaseLease();
+      }
       if (mounted) setState(() => _message = error.toString());
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -1258,22 +1303,22 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  Future<void> _releaseLease() async {
+  Future<bool> _releaseLease() async {
+    final pending = _releaseInFlight;
+    if (pending != null) return pending;
     final lease = _lease;
-    if (lease == null) {
-      await (_releaseInFlight ?? Future<void>.value());
-      return;
-    }
-    _lease = null;
+    if (lease == null) return true;
     _renewal?.cancel();
     _leaseExpiry?.cancel();
     final release = widget.api
         .releaseConnection(lease)
         .timeout(const Duration(seconds: 5))
-        .catchError((Object _) {});
+        .then((_) => true, onError: (Object _) => false);
     _releaseInFlight = release;
-    await release;
+    final released = await release;
+    if (released && identical(_lease, lease)) _lease = null;
     if (identical(release, _releaseInFlight)) _releaseInFlight = null;
+    return released;
   }
 
   Future<void> _refresh() async {

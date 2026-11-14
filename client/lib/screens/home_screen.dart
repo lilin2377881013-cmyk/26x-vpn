@@ -648,13 +648,43 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ),
         const SizedBox(height: 14),
-        Wrap(
-          spacing: 12,
-          runSpacing: 10,
-          children: [
-            _benefit(Icons.devices_outlined, '可登录 ${premium ? 6 : 3} 台设备'),
-            _benefit(Icons.bolt_outlined, '同时在线 ${premium ? 2 : 1} 台'),
-          ],
+        LayoutBuilder(
+          builder: (context, bounds) {
+            final columns = bounds.maxWidth < 360 ? 2 : 4;
+            final width = (bounds.maxWidth - 12 * (columns - 1)) / columns;
+            return Wrap(
+              spacing: 12,
+              runSpacing: 20,
+              children: [
+                SizedBox(
+                  width: width,
+                  child: _benefit('全平台支持', icon: Icons.devices_outlined),
+                ),
+                SizedBox(
+                  width: width,
+                  child: _benefit('同时在线数', value: premium ? '2 台' : '1 台'),
+                ),
+                SizedBox(
+                  width: width,
+                  child: _benefit(
+                    premium ? '极速音频图片' : '流畅音频图片',
+                    icon: premium
+                        ? Icons.bolt_rounded
+                        : Icons.graphic_eq_rounded,
+                  ),
+                ),
+                SizedBox(
+                  width: width,
+                  child: _benefit('高清视频', value: premium ? '4K' : '720P'),
+                ),
+              ],
+            );
+          },
+        ),
+        const SizedBox(height: 14),
+        Text(
+          '可登录 ${premium ? 6 : 3} 台设备',
+          style: const TextStyle(color: _muted),
         ),
         const SizedBox(height: 32),
         const Text(
@@ -725,10 +755,36 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _benefit(IconData icon, String label) => Chip(
-    avatar: Icon(icon, size: 18, color: _gold),
-    label: Text(label),
-    backgroundColor: _panelColor,
+  Widget _benefit(String label, {IconData? icon, String? value}) => Column(
+    children: [
+      Container(
+        width: 72,
+        height: 42,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          gradient: const LinearGradient(
+            colors: [Color(0xFFFFE5BB), Color(0xFFE2B276)],
+          ),
+          borderRadius: BorderRadius.circular(9),
+        ),
+        child: icon != null
+            ? Icon(icon, size: 27, color: const Color(0xFF24212A))
+            : Text(
+                value!,
+                style: const TextStyle(
+                  color: Color(0xFF24212A),
+                  fontSize: 21,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+      ),
+      const SizedBox(height: 10),
+      Text(
+        label,
+        textAlign: TextAlign.center,
+        style: const TextStyle(color: _muted),
+      ),
+    ],
   );
 
   Widget _accountCard() {

@@ -193,10 +193,10 @@ function TrafficLimitsForm({ path, user = false }: { path: string; user?: boolea
             defaultValue={data.monthlyQuotaBytes == null ? "" : data.monthlyQuotaBytes / 1e9} />
         </label>
         <label>{user ? "用户带宽上限（Mbps）" : "该节点总带宽上限（Mbps，留空不限速）"}
-          <input name="bandwidth" type="number" min="1" max={user ? 3 : 100000} step="1" required={user}
-            defaultValue={data.bandwidthMbps ?? (user ? 3 : "")} />
+          <input name="bandwidth" type="number" min="1" max={user ? 20 : 100000} step="1" required={user}
+            defaultValue={data.bandwidthMbps ?? (user ? 20 : "")} />
         </label>
-        <p>{user ? "每个用户默认 3 Mbps，可调低。" : "仅保存此节点的带宽设置。"} 实际限速需由节点执行。</p>
+        <p>{user ? "每个用户默认 20 Mbps（约 2.5 MB/s），可调低。" : "仅保存此节点的带宽设置。"} 实际限速需由节点执行。</p>
         <div><button className="primary-action" disabled={busy}>{busy ? "保存中…" : "保存限制"}</button></div>
         {status && <p role="status">{status}</p>}
       </form>}

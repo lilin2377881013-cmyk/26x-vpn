@@ -155,7 +155,7 @@ month using the daily usage tables. The API denies lease admission and renewal
 when the account reaches its quota. The regional allocator skips nodes that
 reached their quota and does not renew leases assigned to those nodes.
 
-User bandwidth defaults to 3 Mbps and can be set from 1 to 3 Mbps. The node
+Migration 013 sets all existing accounts and the default to 20 Mbps (2.5 MB/s). User bandwidth can be set from 1 to 20 Mbps. The node
 setting is an aggregate rate in Mbps, with an empty value meaning unlimited.
 These two bandwidth values are stored as desired settings. The node operator
 must apply them to the actual VPN traffic before they affect throughput.

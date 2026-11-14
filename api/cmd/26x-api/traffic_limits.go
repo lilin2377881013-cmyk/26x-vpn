@@ -37,7 +37,7 @@ func (s *server) trafficLimits(node bool, update bool) http.HandlerFunc {
 		}
 		if decodeJSON(w, r, &input) != nil ||
 			input.MonthlyQuotaBytes != nil && (*input.MonthlyQuotaBytes < 1 || *input.MonthlyQuotaBytes > 9_000_000_000_000_000) ||
-			input.BandwidthMbps != nil && (*input.BandwidthMbps < 1 || *input.BandwidthMbps > 100_000 || !node && *input.BandwidthMbps > 3) {
+			input.BandwidthMbps != nil && (*input.BandwidthMbps < 1 || *input.BandwidthMbps > 100_000 || !node && *input.BandwidthMbps > 20) {
 			writeError(w, 400, "invalid_limits", "流量额度或带宽超出允许范围")
 			return
 		}
@@ -54,7 +54,7 @@ func (s *server) trafficLimits(node bool, update bool) http.HandlerFunc {
 			err = tx.QueryRowContext(ctx, "UPDATE nodes SET monthly_quota_bytes=$2,bandwidth_mbps=$3 WHERE code=$1 RETURNING id::text", id, input.MonthlyQuotaBytes, input.BandwidthMbps).Scan(&savedID)
 		} else {
 			if input.BandwidthMbps == nil {
-				defaultMbps := 3
+				defaultMbps := 20
 				input.BandwidthMbps = &defaultMbps
 			}
 			err = tx.QueryRowContext(ctx, "UPDATE users SET monthly_quota_bytes=$2,bandwidth_mbps=$3 WHERE id=$1 RETURNING id::text", id, input.MonthlyQuotaBytes, input.BandwidthMbps).Scan(&savedID)

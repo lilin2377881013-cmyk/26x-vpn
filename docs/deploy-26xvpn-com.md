@@ -1,4 +1,4 @@
-# 26xvpn.com single-server deployment
+# 26xvpn.com control-plane deployment
 
 ## Current host state (read-only preflight)
 
@@ -39,6 +39,14 @@ External verification confirmed the apex homepage and account login return 200, 
 
 The project uses account/password authentication for the console. MFA is not implemented. The checked-in Nginx template therefore denies the `/admin` UI and every `/api/v1/admin/*` endpoint from all remote IPs by default. This matches the owner's current choice to keep remote admin closed. When the owner supplies a fixed public IP, add an `allow <fixed-ip>/32;` line in both admin locations and leave `deny all;` in place, then validate and reload Nginx. Do not open the admin API to the internet without the IP rule.
 
-## Availability boundary
+## Host roles
 
-This is a single-server development/private-beta deployment: the website, API, database, and VPN data plane share one host. PostgreSQL and app listeners remain loopback-only. For a public beta, move the control plane away from the VPN node and add a second VPN node in another failure domain. Public account registration, billing, MFA, node credential delivery, and actual VPN tunnels are still not implemented.
+The original host serves the website, admin console, API and PostgreSQL.
+The VPN data plane uses four separate VLESS + REALITY nodes in Hong Kong,
+Osaka, Singapore and Los Angeles. The original node can be kept through the
+client migration so existing sessions can reconnect during the transition.
+
+Publish the new endpoints with region codes HK, JP, SG and US. Apply the
+[regional routing configuration](../deploy/xray/README.md) to their client
+inbounds. Device credentials are issued or assigned through the control
+plane. Public registration, billing and MFA are pending.

@@ -64,13 +64,13 @@ managed VLESS ingress of each region. It has three ordered rules:
 2. Streaming domains in the list use the US egress.
 3. Remaining traffic from that ingress uses the selected region's local egress.
 
-The example uses dedicated VLESS over TLS relay listeners with valid
-certificates in Japan and the US. Set each relay's address, port, TLS name
-and separate UUID in the deployed config. Keep relay credentials outside
+The example uses VLESS + REALITY with Vision for the Japan and US relays.
+Set each relay's address, port, SNI, public key, short ID and dedicated UUID
+in the deployed config. Keep relay credentials outside
 Git. On the Japan ingress, point the OpenAI rule at `region-direct` and
 omit the `jp-openai` outbound. On the US ingress, point the streaming rule
-at `region-direct` and omit the `us-streaming` outbound. Relay listeners
-should use separate inbound tags and send their relayed traffic out locally.
+at `region-direct` and omit the `us-streaming` outbound. Route relay traffic directly at its destination. Use a separate inbound tag
+for each relay listener or an early rule matching its dedicated VLESS user.
 
 Add the applicable outbounds to the existing configuration. Place the
 three rules after any control or policy rules that must take precedence

@@ -9,15 +9,19 @@
       "protocol": "vless",
       "settings": {
         "address": "jp-vps.example.com",
-        "port": 443,
+        "port": 8443,
         "id": "00000000-0000-4000-8000-000000000000",
-        "encryption": "none"
+        "encryption": "none",
+        "flow": "xtls-rprx-vision"
       },
       "streamSettings": {
         "network": "raw",
-        "security": "tls",
-        "tlsSettings": {
-          "serverName": "jp-vps.example.com"
+        "security": "reality",
+        "realitySettings": {
+          "serverName": "www.microsoft.com",
+          "fingerprint": "chrome",
+          "password": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          "shortId": "0123456789abcdef"
         }
       }
     },
@@ -26,15 +30,19 @@
       "protocol": "vless",
       "settings": {
         "address": "us-vps.example.com",
-        "port": 443,
+        "port": 8443,
         "id": "00000000-0000-4000-8000-000000000000",
-        "encryption": "none"
+        "encryption": "none",
+        "flow": "xtls-rprx-vision"
       },
       "streamSettings": {
         "network": "raw",
-        "security": "tls",
-        "tlsSettings": {
-          "serverName": "us-vps.example.com"
+        "security": "reality",
+        "realitySettings": {
+          "serverName": "www.microsoft.com",
+          "fingerprint": "chrome",
+          "password": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          "shortId": "0123456789abcdef"
         }
       }
     }

@@ -60,15 +60,26 @@ class ApiClient {
 
   bool get isSignedIn => _cookies.containsKey('26x_session') && account != null;
 
-  Future<Account> signIn(String email, String password) async {
+  Future<Account> signIn(String email, String password) =>
+      _authenticate('/api/v1/auth/session', email, password, '邮箱或密码不正确');
+
+  Future<Account> register(String email, String password) =>
+      _authenticate('/api/v1/auth/register', email, password, '注册失败，请稍后重试');
+
+  Future<Account> _authenticate(
+    String endpoint,
+    String email,
+    String password,
+    String failureMessage,
+  ) async {
     final result = await _request(
       'POST',
-      '/api/v1/auth/session',
+      endpoint,
       body: {'email': email.trim(), 'password': password},
     );
     if (result.statusCode != HttpStatus.created) {
       throw ApiException(
-        _errorMessage(result.body, '邮箱或密码不正确'),
+        _errorMessage(result.body, failureMessage),
         statusCode: result.statusCode,
       );
     }
@@ -118,17 +129,28 @@ class ApiClient {
     return _decode(result.body)['id'] as String;
   }
 
-  Future<void> checkout(String planCode) async {
+  Future<Uri> checkout(String planCode) async {
     final result = await _request(
       'POST',
       '/api/v1/me/checkout',
       csrf: true,
       body: {'planCode': planCode},
     );
-    throw ApiException(
-      _errorMessage(result.body, '支付暂未开放'),
-      statusCode: result.statusCode,
-    );
+    if (result.statusCode != HttpStatus.created) {
+      throw ApiException(
+        _errorMessage(result.body, '支付暂未开放'),
+        statusCode: result.statusCode,
+      );
+    }
+    final value = _decode(result.body)['payUrl'];
+    final uri = value is String ? Uri.tryParse(value) : null;
+    if (uri == null ||
+        uri.scheme != 'https' ||
+        uri.host.isEmpty ||
+        uri.userInfo.isNotEmpty) {
+      throw const ApiException('支付链接无效，请联系 26x 支持。');
+    }
+    return uri;
   }
 
   Future<bool> restoreSession() async {

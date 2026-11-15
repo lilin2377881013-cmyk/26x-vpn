@@ -94,16 +94,25 @@ class _HomeScreenState extends State<HomeScreen> {
     super.dispose();
   }
 
+  bool _registering = false;
+
   Future<void> _signIn() async {
     setState(() {
       _busy = true;
       _message = null;
     });
     try {
-      _account = await widget.api.signIn(_email.text, _password.text);
+      _account = _registering
+          ? await widget.api.register(_email.text, _password.text)
+          : await widget.api.signIn(_email.text, _password.text);
       await _loadDevices();
       unawaited(_loadPlans());
-      if (mounted) setState(() => _password.clear());
+      if (mounted) {
+        setState(() {
+          _password.clear();
+          _registering = false;
+        });
+      }
     } catch (error) {
       if (mounted) setState(() => _message = error.toString());
     } finally {
@@ -128,12 +137,26 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _checkout(VpnPlan plan) async {
+    if (_account?.trialCode != null) {
+      setState(() => _message = '试用用户请在个人页面退出试用，再注册或登录后购买。');
+      return;
+    }
+    if (Platform.isIOS) {
+      setState(() => _message = '此 iOS 版本暂未开放购买。');
+      return;
+    }
     setState(() {
       _busy = true;
       _message = null;
     });
     try {
-      await widget.api.checkout(plan.code);
+      final payUrl = await widget.api.checkout(plan.code);
+      if (!await launchUrl(payUrl, mode: LaunchMode.externalApplication)) {
+        throw const ApiException('无法打开支付页面，请稍后重试。');
+      }
+      if (mounted) {
+        setState(() => _message = '支付完成后请返回 26x，点击刷新会员状态。');
+      }
     } catch (error) {
       if (mounted) setState(() => _message = error.toString());
     } finally {
@@ -497,9 +520,9 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
           const SizedBox(height: 8),
-          const Text(
-            '登录账户或开始免费试用。',
-            style: TextStyle(color: Color(0xFF66777D), height: 1.5),
+          Text(
+            _registering ? '填写邮箱并设置至少 12 位的密码。' : '登录、注册或开始免费试用。',
+            style: const TextStyle(color: Color(0xFF66777D), height: 1.5),
           ),
           const SizedBox(height: 26),
           TextField(
@@ -512,7 +535,9 @@ class _HomeScreenState extends State<HomeScreen> {
           TextField(
             controller: _password,
             obscureText: true,
-            autofillHints: const [AutofillHints.password],
+            autofillHints: [
+              _registering ? AutofillHints.newPassword : AutofillHints.password,
+            ],
             onSubmitted: (_) {
               if (!_busy) unawaited(_signIn());
             },
@@ -543,22 +568,34 @@ class _HomeScreenState extends State<HomeScreen> {
                         color: Colors.white,
                       ),
                     )
-                  : const Text(
-                      '登录账户',
-                      style: TextStyle(
+                  : Text(
+                      _registering ? '注册账户' : '登录账户',
+                      style: const TextStyle(
                         fontSize: 15,
                         fontWeight: FontWeight.w700,
                       ),
                     ),
             ),
           ),
-          const SizedBox(height: 18),
           Center(
             child: TextButton(
-              onPressed: _busy ? null : _startTrial,
-              child: const Text('新用户免费试用 15 分钟'),
+              onPressed: _busy
+                  ? null
+                  : () => setState(() {
+                      _registering = !_registering;
+                      _password.clear();
+                      _message = null;
+                    }),
+              child: Text(_registering ? '已有账号，返回登录' : '注册新账号'),
             ),
           ),
+          if (!_registering)
+            Center(
+              child: TextButton(
+                onPressed: _busy ? null : _startTrial,
+                child: const Text('新用户免费试用 15 分钟'),
+              ),
+            ),
         ],
       ),
     ),
@@ -782,6 +819,11 @@ class _HomeScreenState extends State<HomeScreen> {
               child: Text(_busy ? '请稍候…' : '开通会员'),
             ),
           ),
+          if (!Platform.isIOS && _account?.trialCode == null)
+            TextButton(
+              onPressed: _busy ? null : _refresh,
+              child: const Text('刷新会员状态'),
+            ),
         ],
         const SizedBox(height: 16),
       ],

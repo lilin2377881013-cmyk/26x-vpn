@@ -161,7 +161,17 @@ private final class TunnelBridgePlugin: NSObject, FlutterPlugin, FlutterStreamHa
     let status = session.status
     if status == .connected {
       finish(nil)
-    } else if DispatchTime.now() >= deadline || (sawConnecting && status == .disconnected) {
+    } else if sawConnecting && status == .disconnected {
+      if #available(iOS 16.0, *) {
+        session.fetchLastDisconnectError { error in
+          DispatchQueue.main.async {
+            finish(self.startupFailure(error))
+          }
+        }
+      } else {
+        finish(startupFailure(nil))
+      }
+    } else if DispatchTime.now() >= deadline {
       session.stopTunnel()
       finish(failure("tunnel_start_failed", "VPN 隧道连接失败。"))
     } else {
@@ -172,6 +182,24 @@ private final class TunnelBridgePlugin: NSObject, FlutterPlugin, FlutterStreamHa
           finish: finish
         )
       }
+    }
+  }
+
+  private func startupFailure(_ error: Error?) -> FlutterError {
+    guard let error = error as NSError?, error.domain == "com.26xvpn.client.tunnel" else {
+      return failure("tunnel_start_failed", "VPN 隧道连接失败。")
+    }
+    switch error.code {
+    case 1001:
+      return failure("profile_invalid", "VPN 配置格式无效。")
+    case 1003:
+      return failure("tunnel_routes_failed", "系统未能配置 VPN 路由。")
+    case 1005:
+      return failure("tunnel_core_failed", "VPN 核心启动失败。")
+    case 1009, 1010:
+      return failure("node_unreachable", "VPN 节点连接检查失败。")
+    default:
+      return failure("tunnel_start_failed", "VPN 隧道连接失败。")
     }
   }
 

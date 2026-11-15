@@ -163,6 +163,8 @@ class TunnelController {
     'extension_restart_required' => '请重启 Mac，再连接 26x VPN。',
     'tunnel_busy' => '请等当前 VPN 操作完成后重试。',
     'node_unreachable' => '节点未能转发 HTTPS 请求，请稍后重试。',
+    'tunnel_routes_failed' => '系统未能配置 VPN 路由。',
+    'tunnel_core_failed' => 'VPN 核心启动失败。',
     'tunnel_start_failed' => '系统未能启动 VPN 隧道，请稍后重试。',
     'tunnel_stop_failed' => '系统未能正常断开 VPN。',
     _ => 'VPN 隧道操作失败，请稍后重试。',

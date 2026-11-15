@@ -1,6 +1,11 @@
 name: Windows and iOS client builds
 on:
   workflow_dispatch:
+    inputs:
+      build_ios:
+        description: Build the unsigned iOS package
+        type: boolean
+        default: false
   push:
     paths:
       - 'client/**'
@@ -39,6 +44,7 @@ jobs:
           path: client/build/windows/x64/runner/Release/
           if-no-files-found: error
   ios:
+    if: github.event_name == 'workflow_dispatch' && inputs.build_ios
     runs-on: macos-26
     steps:
       - uses: actions/checkout@v4

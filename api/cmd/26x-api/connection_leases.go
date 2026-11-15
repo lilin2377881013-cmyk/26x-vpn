@@ -37,8 +37,8 @@ func (s *server) acquireConnectionLease(w http.ResponseWriter, r *http.Request) 
 	defer tx.Rollback()
 
 	// Serialize admissions and renewals across devices of the same member.
-	var active bool
-	err = tx.QueryRowContext(ctx, `SELECT status = 'active' FROM users WHERE id = $1 FOR UPDATE`, user.id).Scan(&active)
+	var active, unrestricted bool
+	err = tx.QueryRowContext(ctx, `SELECT status = 'active', unrestricted FROM users WHERE id = $1 FOR UPDATE`, user.id).Scan(&active, &unrestricted)
 	if errors.Is(err, sql.ErrNoRows) || (err == nil && !active) {
 		writeError(w, http.StatusForbidden, "account_inactive", "An active account is required")
 		return
@@ -48,7 +48,7 @@ func (s *server) acquireConnectionLease(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	var quotaAvailable bool
-	err = tx.QueryRowContext(ctx, `SELECT monthly_quota_bytes IS NULL OR (
+	err = tx.QueryRowContext(ctx, `SELECT unrestricted OR monthly_quota_bytes IS NULL OR (
 		SELECT COALESCE(sum(bytes_up) + sum(bytes_down), 0) < monthly_quota_bytes
 		FROM usage_daily WHERE user_id=$1
 		AND usage_day >= date_trunc('month', now() AT TIME ZONE 'UTC')::date
@@ -75,14 +75,14 @@ func (s *server) acquireConnectionLease(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	var limit int
+	var limit sql.NullInt64
 	var subscriptionEnd sql.NullTime
 	var trial bool
-	err = tx.QueryRowContext(ctx, `SELECT CASE WHEN p.tier = 'premium' THEN 2 ELSE 1 END, sub.ends_at, p.code = 'trial-15m'
+	err = tx.QueryRowContext(ctx, `SELECT CASE WHEN $2 THEN NULL WHEN p.tier = 'premium' THEN 2 ELSE 1 END, sub.ends_at, p.code = 'trial-15m'
 		FROM subscriptions sub JOIN plans p ON p.id = sub.plan_id
 		WHERE sub.user_id = $1 AND sub.status = 'active' AND sub.starts_at <= now()
 			AND (sub.ends_at IS NULL OR sub.ends_at > now())
-		ORDER BY sub.ends_at DESC NULLS FIRST LIMIT 1`, user.id).Scan(&limit, &subscriptionEnd, &trial)
+		ORDER BY sub.ends_at DESC NULLS FIRST LIMIT 1`, user.id, unrestricted).Scan(&limit, &subscriptionEnd, &trial)
 	if errors.Is(err, sql.ErrNoRows) {
 		writeError(w, http.StatusForbidden, "subscription_required", "An active subscription is required")
 		return
@@ -155,7 +155,7 @@ func (s *server) acquireConnectionLease(w http.ResponseWriter, r *http.Request) 
 			connectionLeaseError(w)
 			return
 		}
-		if count >= limit {
+		if limit.Valid && int64(count) >= limit.Int64 {
 			writeError(w, http.StatusConflict, "connection_limit_reached", "Disconnect another device before connecting")
 			return
 		}

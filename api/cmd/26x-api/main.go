@@ -34,6 +34,7 @@ type config struct {
 	credentialKey  []byte
 	managedVLESS   *managedVLESS
 	nodeCommand    string
+	payment        *paymentGateway
 }
 
 func main() {
@@ -124,6 +125,10 @@ func loadConfig() (config, error) {
 		return cfg, errors.New("DATABASE_URL is required")
 	}
 	var err error
+	cfg.payment, err = loadPaymentGateway()
+	if err != nil {
+		return cfg, err
+	}
 	cfg.cookieSecure, err = strconv.ParseBool(env("COOKIE_SECURE", "true"))
 	if err != nil {
 		return cfg, errors.New("COOKIE_SECURE must be true or false")

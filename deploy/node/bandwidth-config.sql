@@ -1,7 +1,7 @@
 SELECT jsonb_build_object(
     'nodeMbps', n.bandwidth_mbps,
     'users', COALESCE((
-        SELECT jsonb_object_agg(labels.label, jsonb_build_object('account', u.id, 'mbps', u.bandwidth_mbps))
+        SELECT jsonb_object_agg(labels.label, jsonb_build_object('account', u.id, 'mbps', CASE WHEN u.unrestricted THEN -1 ELSE u.bandwidth_mbps END))
         FROM users u JOIN devices d ON d.user_id = u.id
         CROSS JOIN LATERAL (VALUES ('device-' || left(d.id::text, 8) || '@' || n.code),
                                   ('26x-device-' || d.id::text)) AS labels(label)

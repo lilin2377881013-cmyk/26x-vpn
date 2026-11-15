@@ -29,6 +29,13 @@ var bandwidth = struct {
 	node     *rate.Limiter
 }{accounts: make(map[string]*rate.Limiter), node: rate.NewLimiter(rate.Inf, 64*1024)}
 
+func accountRate(mbps int) rate.Limit {
+	if mbps == -1 {
+		return rate.Inf
+	}
+	return rate.Limit(float64(mbps) * 125000)
+}
+
 func bandwidthLimiters(label string) (*rate.Limiter, *rate.Limiter) {
 	bandwidth.Lock()
 	defer bandwidth.Unlock()
@@ -44,20 +51,20 @@ func bandwidthLimiters(label string) (*rate.Limiter, *rate.Limiter) {
 				}
 				bandwidth.node.SetLimitAt(now, nodeRate)
 				for _, rule := range cfg.Users {
-					if limit := bandwidth.accounts[rule.Account]; limit != nil && rule.Mbps > 0 {
-						limit.SetLimitAt(now, rate.Limit(float64(rule.Mbps)*125000))
+					if limit := bandwidth.accounts[rule.Account]; limit != nil && rule.Mbps != 0 {
+						limit.SetLimitAt(now, accountRate(rule.Mbps))
 					}
 				}
 			}
 		}
 	}
 	rule := bandwidth.config.Users[label]
-	if rule.Account == "" || rule.Mbps < 1 {
+	if rule.Account == "" || rule.Mbps == 0 {
 		rule = bandwidthRule{Account: label, Mbps: 20}
 	}
 	limit := bandwidth.accounts[rule.Account]
 	if limit == nil {
-		limit = rate.NewLimiter(rate.Limit(float64(rule.Mbps)*125000), 64*1024)
+		limit = rate.NewLimiter(accountRate(rule.Mbps), 64*1024)
 		bandwidth.accounts[rule.Account] = limit
 	}
 	return limit, bandwidth.node

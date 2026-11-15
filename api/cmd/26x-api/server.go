@@ -25,12 +25,13 @@ const sessionCookie = "26x_session"
 const csrfCookie = "26x_csrf"
 
 type server struct {
-	db           *sql.DB
-	cfg          config
-	logger       *slog.Logger
-	limiter      *loginLimiter
-	trialLimiter *loginLimiter
-	hashSlots    chan struct{}
+	db                  *sql.DB
+	cfg                 config
+	logger              *slog.Logger
+	limiter             *loginLimiter
+	trialLimiter        *loginLimiter
+	registrationLimiter *loginLimiter
+	hashSlots           chan struct{}
 }
 
 type actor struct {
@@ -51,7 +52,7 @@ type loginWindow struct {
 }
 
 func newServer(db *sql.DB, cfg config, logger *slog.Logger) *server {
-	return &server{db: db, cfg: cfg, logger: logger, limiter: &loginLimiter{entries: make(map[string]loginWindow)}, trialLimiter: &loginLimiter{entries: make(map[string]loginWindow)}, hashSlots: make(chan struct{}, 4)}
+	return &server{db: db, cfg: cfg, logger: logger, limiter: &loginLimiter{entries: make(map[string]loginWindow)}, trialLimiter: &loginLimiter{entries: make(map[string]loginWindow)}, registrationLimiter: &loginLimiter{entries: make(map[string]loginWindow)}, hashSlots: make(chan struct{}, 4)}
 }
 
 func (s *server) hashPassword(password string) (string, error) {
@@ -83,8 +84,10 @@ func (s *server) routes() http.Handler {
 	mux.HandleFunc("GET /api/v1/admin/downloads", s.requireAdmin(s.listDownloads, "owner", "operations"))
 	mux.HandleFunc("PUT /api/v1/admin/downloads/{channel}", s.requireAdmin(s.withCSRF(s.saveDownloads), "owner", "operations"))
 	mux.HandleFunc("POST /api/v1/auth/session", s.userLogin)
+	mux.HandleFunc("POST /api/v1/auth/register", s.registerAccount)
 	mux.HandleFunc("POST /api/v1/auth/trial", s.startTrial)
 	mux.HandleFunc("POST /api/v1/me/checkout", s.requireUser(s.withUserCSRF(s.checkout)))
+	mux.HandleFunc("POST "+paymentNotifyPath, s.paymentNotify)
 	mux.HandleFunc("POST /api/v1/me/password", s.requireUser(s.withUserCSRF(s.changeMyPassword)))
 	mux.HandleFunc("POST /api/v1/me/support", s.requireUser(s.withUserCSRF(s.submitSupport)))
 	mux.HandleFunc("GET /api/v1/admin/support", s.requireAdmin(s.listSupport, "owner", "operations", "support"))
@@ -507,8 +510,8 @@ func (s *server) registerDevice(w http.ResponseWriter, r *http.Request) {
 	defer tx.Rollback()
 	// Serialize concurrent device registrations for this account before checking
 	// its limit; otherwise two requests could both consume the last available slot.
-	var lockedUserID string
-	if err := tx.QueryRowContext(r.Context(), "SELECT id::text FROM users WHERE id = $1 FOR UPDATE", current.id).Scan(&lockedUserID); err != nil {
+	var unrestricted bool
+	if err := tx.QueryRowContext(r.Context(), "SELECT unrestricted FROM users WHERE id = $1 FOR UPDATE", current.id).Scan(&unrestricted); err != nil {
 		writeError(w, http.StatusUnauthorized, "sign_in_required", "Sign in to your 26x account")
 		return
 	}
@@ -529,7 +532,7 @@ func (s *server) registerDevice(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Unable to check device limit")
 		return
 	}
-	if count >= deviceLimit {
+	if !unrestricted && count >= deviceLimit {
 		writeError(w, http.StatusConflict, "device_limit_reached", "Remove a device before adding another")
 		return
 	}

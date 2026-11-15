@@ -102,24 +102,3 @@ func (s *server) startTrial(w http.ResponseWriter, r *http.Request) {
 func trialError(w http.ResponseWriter) {
 	writeError(w, http.StatusInternalServerError, "trial_failed", "暂时无法开启试用")
 }
-
-func (s *server) checkout(w http.ResponseWriter, r *http.Request) {
-	var input struct {
-		PlanCode string `json:"planCode"`
-	}
-	if decodeJSON(w, r, &input) != nil || input.PlanCode == "" || len(input.PlanCode) > 80 {
-		writeError(w, http.StatusBadRequest, "invalid_plan", "请选择套餐")
-		return
-	}
-	var active bool
-	if err := s.db.QueryRowContext(r.Context(), `SELECT EXISTS (SELECT 1 FROM plans
-		WHERE code=$1 AND active AND price_cents IS NOT NULL)`, input.PlanCode).Scan(&active); err != nil {
-		writeError(w, http.StatusInternalServerError, "checkout_failed", "无法读取套餐")
-		return
-	}
-	if !active {
-		writeError(w, http.StatusNotFound, "plan_unavailable", "该套餐暂不可购买")
-		return
-	}
-	writeError(w, http.StatusServiceUnavailable, "payment_unavailable", "支付暂未开放")
-}

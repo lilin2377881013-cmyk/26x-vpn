@@ -24,25 +24,28 @@ def main():
     txt = Path("/etc/26x/api.env").read_text()
     key = AESGCM(base64.b64decode(re.search(r"^CREDENTIAL_ENCRYPTION_KEY=(\S+)$", txt, re.M).group(1)))
     state = Path("/opt/26x-node/state")
-    # Trial credentials are managed by the API on the website host.
     eligible = """d.revoked_at IS NULL AND u.status='active'
         AND e.enabled AND n.status IN ('online','degraded') AND EXISTS (
             SELECT 1 FROM subscriptions s WHERE s.user_id=u.id AND s.status='active'
             AND s.starts_at<=now() AND (s.ends_at IS NULL OR s.ends_at>now())
-        ) AND NOT EXISTS (SELECT 1 FROM trial_accounts t WHERE t.user_id=u.id)"""
+        ) AND (NOT EXISTS (SELECT 1 FROM trial_accounts t WHERE t.user_id=u.id)
+               OR (UPPER(n.region_code)='HK' AND lease.expires_at>now()))"""
     rows = json.loads(sql(f"""
         SELECT COALESCE(json_agg(selection),'[]') FROM (
             SELECT n.code, e.port, e.id AS endpoint, d.id AS device, c.id AS id, c.status,
-                   encode(c.credential_ciphertext, 'hex') AS cipher, ({eligible}) AS eligible
+                   encode(c.credential_ciphertext, 'hex') AS cipher, COALESCE(({eligible}),FALSE) AS eligible,
+                   EXISTS (SELECT 1 FROM trial_accounts t WHERE t.user_id=u.id) AS trial
             FROM devices d JOIN users u ON u.id=d.user_id
             CROSS JOIN node_endpoints e JOIN nodes n ON n.id=e.node_id
             LEFT JOIN device_node_credentials c ON c.device_id=d.id AND c.endpoint_id=e.id
+            LEFT JOIN connection_leases lease ON lease.device_id=d.id AND lease.endpoint_id=e.id
             WHERE e.protocol='vless_reality' AND n.code<>'hk-01'
             AND (
                 ((c.id IS NULL OR c.managed AND c.status='revoked') AND ({eligible}))
                 OR (c.managed AND c.status IN ('pending','active','revoking') AND c.reconcile_after<=now())
             )
-            ORDER BY COALESCE(c.reconcile_after, d.created_at), n.code LIMIT 32
+            ORDER BY CASE WHEN lease.expires_at>now() AND (c.id IS NULL OR c.status IN ('pending','revoked')) THEN 0 ELSE 1 END,
+                COALESCE(c.reconcile_after, d.created_at), n.code LIMIT 32
         ) selection;
     """))
     failures = 0
@@ -87,9 +90,12 @@ def main():
                 env={**os.environ, "SSHPASS": auth},
             )
             status = "active" if wanted else "revoked"
+            reconcile_at = "now()+interval '2 minutes'"
+            if wanted and row["trial"]:
+                reconcile_at = f"LEAST({reconcile_at}, COALESCE((SELECT expires_at FROM connection_leases WHERE device_id='{device}' AND endpoint_id='{endpoint}'),now()))"
             sql(f"""UPDATE device_node_credentials SET status='{status}',
                     revoked_at={'NULL' if wanted else 'now()'},
-                    reconcile_after=now()+interval '2 minutes'
+                    reconcile_after={reconcile_at}
                     WHERE id='{identifier}' AND managed
                       AND (status<>'revoking' OR '{status}'='revoked');""")
         except (OSError, KeyError, ValueError, InvalidTag, subprocess.SubprocessError):

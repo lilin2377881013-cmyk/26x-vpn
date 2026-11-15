@@ -649,12 +649,17 @@ func (s *server) writeClientNodes(w http.ResponseWriter, r *http.Request, rawDev
 		FROM nodes n JOIN node_endpoints e ON e.node_id = n.id AND e.enabled = TRUE
 		JOIN devices d ON d.id = $1 AND d.user_id = $2 AND d.revoked_at IS NULL
 		LEFT JOIN device_node_credentials c ON c.device_id = d.id AND c.endpoint_id = e.id AND c.revoked_at IS NULL
-			AND (NOT $3 OR NOT c.managed OR EXISTS (
-				SELECT 1 FROM connection_leases l WHERE l.device_id = d.id AND l.expires_at > now()
-			))
+			AND CASE WHEN EXISTS (SELECT 1 FROM trial_accounts t WHERE t.user_id=$2)
+            THEN EXISTS (SELECT 1 FROM connection_leases l WHERE l.device_id=d.id
+                         AND l.endpoint_id=e.id AND l.expires_at>now())
+            ELSE (NOT $3 AND e.id=$4::uuid) OR NOT c.managed OR EXISTS (
+              SELECT 1 FROM connection_leases l WHERE l.device_id=d.id AND l.expires_at>now()
+            ) END
 		WHERE n.status IN ('online', 'degraded')
 		AND CASE WHEN EXISTS(SELECT 1 FROM trial_accounts WHERE user_id=$2)
-			THEN e.id=$4::uuid
+			THEN n.code<>'hk-01' AND UPPER(n.region_code)='HK' AND e.protocol='vless_reality'
+                 AND NOT EXISTS (SELECT 1 FROM connection_leases l WHERE l.device_id=d.id
+                                 AND l.expires_at>now() AND l.endpoint_id IS DISTINCT FROM e.id)
 			ELSE NOT $5 OR e.id<>$4::uuid END
 		AND EXISTS (
 			SELECT 1 FROM subscriptions

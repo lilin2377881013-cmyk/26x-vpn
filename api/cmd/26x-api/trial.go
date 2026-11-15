@@ -43,11 +43,6 @@ func (s *server) startTrial(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"code": code, "endsAt": nullableTime(ends)})
 		return
 	}
-	// The managed endpoint removes the trial credential when its lease expires.
-	if !s.nodeRequiresLease() {
-		writeError(w, http.StatusServiceUnavailable, "trial_unavailable", "试用线路暂未开放")
-		return
-	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		trialError(w)
@@ -69,8 +64,8 @@ func (s *server) startTrial(w http.ResponseWriter, r *http.Request) {
 		s.trialLimiter.fail(ip)
 		var healthy bool
 		if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM node_endpoints e JOIN nodes n ON n.id=e.node_id
-			WHERE e.id=$1 AND e.enabled AND e.protocol='vless_reality' AND n.status IN ('online','degraded'))`,
-			s.cfg.managedVLESS.endpoint).Scan(&healthy); err != nil || !healthy {
+			WHERE n.code<>'hk-01' AND UPPER(n.region_code)='HK' AND e.enabled AND e.protocol='vless_reality'
+			AND n.status IN ('online','degraded') AND node_monthly_quota_available(n.id,n.monthly_quota_bytes))`).Scan(&healthy); err != nil || !healthy {
 			writeError(w, http.StatusServiceUnavailable, "trial_unavailable", "试用线路暂未开放")
 			return
 		}

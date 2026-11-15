@@ -37,7 +37,7 @@ func TestTrialIdentityAndFixedExpiration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := newServer(db, config{managedVLESS: &managedVLESS{endpoint: endpoint, requireLease: true, trialOnly: true}}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	s := newServer(db, config{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	installation := base64.RawURLEncoding.EncodeToString(make([]byte, 32))
 	request := func(identify bool) *httptest.ResponseRecorder {
 		input, _ := json.Marshal(map[string]any{"installation": installation, "platform": "macos", "identifyOnly": identify})
@@ -62,6 +62,30 @@ func TestTrialIdentityAndFixedExpiration(t *testing.T) {
 	}
 	if w := request(false); w.Code != 201 {
 		t.Fatalf("trial failed: %d %s", w.Code, w.Body.String())
+	}
+	var user, device string
+	if err := db.QueryRow(`SELECT t.user_id::text,d.id::text FROM trial_accounts t JOIN devices d ON d.user_id=t.user_id WHERE t.code=$1`, code).Scan(&user, &device); err != nil {
+		t.Fatal(err)
+	}
+	requestLease := func(body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPut, "/", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		req.SetPathValue("id", device)
+		w := httptest.NewRecorder()
+		s.acquireConnectionLease(w, req.WithContext(contextWithActor(req, actor{id: user})))
+		return w
+	}
+	if w := requestLease(`{"region":"JP"}`); w.Code != http.StatusForbidden {
+		t.Fatalf("trial picked a different region: %d %s", w.Code, w.Body.String())
+	}
+	w := requestLease(`{}`)
+	var lease struct{ EndpointID, Token string }
+	if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &lease) != nil || lease.EndpointID != endpoint {
+		t.Fatalf("legacy trial client did not reserve regional HK: %d %s", w.Code, w.Body.String())
+	}
+	body, _ := json.Marshal(map[string]string{"token": lease.Token})
+	if w := requestLease(string(body)); w.Code != http.StatusOK {
+		t.Fatalf("HK trial lease could not renew: %d %s", w.Code, w.Body.String())
 	}
 	current, ends := readIdentity()
 	expiry, err := time.Parse(time.RFC3339, ends)

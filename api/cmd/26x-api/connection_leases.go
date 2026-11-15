@@ -92,9 +92,12 @@ func (s *server) acquireConnectionLease(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	if trial && (!s.nodeRequiresLease() || input.Region != "") {
-		writeError(w, http.StatusForbidden, "trial_unavailable", "试用线路暂未开放")
-		return
+	if trial {
+		if input.Region != "" && input.Region != "HK" {
+			writeError(w, http.StatusForbidden, "trial_region", "试用使用香港线路")
+			return
+		}
+		input.Region = "HK"
 	}
 
 	var token = input.Token
@@ -117,12 +120,14 @@ func (s *server) acquireConnectionLease(w http.ResponseWriter, r *http.Request) 
 				WHERE l.user_id = $2 AND l.expires_at > now()
 				ORDER BY l.acquired_at, l.device_id LIMIT $5
 			)
+			AND (NOT $7 OR endpoint_id IS NOT NULL)
 			AND (endpoint_id IS NULL OR EXISTS (
 				SELECT 1 FROM node_endpoints e JOIN nodes n ON n.id=e.node_id
 				WHERE e.id=connection_leases.endpoint_id AND e.enabled AND n.status IN ('online','degraded')
 				AND node_monthly_quota_available(n.id,n.monthly_quota_bytes)
+				AND (NOT $7 OR (n.code<>'hk-01' AND UPPER(n.region_code)='HK'))
 			))
-			RETURNING expires_at, endpoint_id::text`, device, user.id, hash[:], int(connectionLeaseLifetime.Seconds()), limit, subscriptionEnd).Scan(&expires, &endpoint)
+			RETURNING expires_at, endpoint_id::text`, device, user.id, hash[:], int(connectionLeaseLifetime.Seconds()), limit, subscriptionEnd, trial).Scan(&expires, &endpoint)
 		if errors.Is(err, sql.ErrNoRows) {
 			writeError(w, http.StatusConflict, "connection_lease_expired", "Reconnect to renew VPN access")
 			return
@@ -174,7 +179,7 @@ func (s *server) acquireConnectionLease(w http.ResponseWriter, r *http.Request) 
 			}
 			err = tx.QueryRowContext(ctx, `SELECT e.id::text
 				FROM nodes n JOIN node_endpoints e ON e.node_id=n.id AND e.enabled
-				JOIN device_node_credentials c ON c.endpoint_id=e.id AND c.device_id=$1
+				LEFT JOIN device_node_credentials c ON c.endpoint_id=e.id AND c.device_id=$1
 					AND c.status='active' AND c.revoked_at IS NULL
 				CROSS JOIN LATERAL (
 					SELECT count(DISTINCT l.user_id) AS seats, count(*) AS connections,
@@ -184,11 +189,13 @@ func (s *server) acquireConnectionLease(w http.ResponseWriter, r *http.Request) 
 					WHERE le.node_id=n.id AND l.expires_at > clock_timestamp()
 				) load
 				WHERE ($4::uuid IS NULL OR e.id<>$4)
+					AND ($5 OR c.device_id IS NOT NULL)
+					AND (NOT $5 OR (n.code<>'hk-01' AND e.protocol='vless_reality'))
 					AND UPPER(n.region_code)=$2 AND n.status IN ('online','degraded')
 					AND node_monthly_quota_available(n.id,n.monthly_quota_bytes)
 					AND (load.has_user OR n.capacity_limit IS NULL OR load.seats < n.capacity_limit)
 				ORDER BY CASE WHEN n.status='online' THEN 0 ELSE 1 END,
-					load.seats, load.connections, load.has_user DESC, n.code, e.id LIMIT 1`, device, input.Region, user.id, trialOnlyEndpoint).Scan(&endpoint)
+					load.seats, load.connections, load.has_user DESC, n.code, e.id LIMIT 1`, device, input.Region, user.id, trialOnlyEndpoint, trial).Scan(&endpoint)
 			if errors.Is(err, sql.ErrNoRows) {
 				writeError(w, http.StatusConflict, "region_unavailable", "No server in this region has space and an active device credential")
 				return

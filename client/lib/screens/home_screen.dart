@@ -151,7 +151,35 @@ class _HomeScreenState extends State<HomeScreen> {
     });
     try {
       final payUrl = await widget.api.checkout(plan.code);
-      if (!await launchUrl(payUrl, mode: LaunchMode.externalApplication)) {
+      if (!mounted) return;
+      if (Platform.isWindows || Platform.isMacOS) {
+        await showDialog<void>(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            title: const Text('支付宝扫码支付'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ColoredBox(
+                  color: Colors.white,
+                  child: QrImageView(data: payUrl.toString(), size: 208),
+                ),
+                const SizedBox(height: 12),
+                const Text('用手机支付宝扫一扫，完成后点击刷新会员状态。'),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(),
+                child: const Text('关闭'),
+              ),
+            ],
+          ),
+        );
+      } else if (!await launchUrl(
+        payUrl,
+        mode: LaunchMode.externalApplication,
+      )) {
         throw const ApiException('无法打开支付页面，请稍后重试。');
       }
       if (mounted) {

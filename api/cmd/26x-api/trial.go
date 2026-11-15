@@ -8,17 +8,14 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 )
 
 func (s *server) startTrial(w http.ResponseWriter, r *http.Request) {
-	// The managed endpoint removes the trial credential after its lease expires.
-	if !s.nodeRequiresLease() {
-		writeError(w, http.StatusServiceUnavailable, "trial_unavailable", "试用线路暂未开放")
-		return
-	}
 	var input struct {
 		Installation string `json:"installation"`
 		Platform     string `json:"platform"`
+		IdentifyOnly bool   `json:"identifyOnly"`
 	}
 	if decodeJSON(w, r, &input) != nil {
 		writeError(w, http.StatusBadRequest, "invalid_trial", "无效的试用请求")
@@ -32,6 +29,25 @@ func (s *server) startTrial(w http.ResponseWriter, r *http.Request) {
 	}
 	hash := sha256.Sum256(secret)
 	ctx := r.Context()
+	code := strings.ToUpper(hex.EncodeToString(hash[:8]))
+	if input.IdentifyOnly {
+		var ends sql.NullTime
+		err := s.db.QueryRowContext(ctx, `SELECT t.code, max(sub.ends_at) FROM trial_accounts t
+   LEFT JOIN subscriptions sub ON sub.user_id=t.user_id
+   WHERE t.installation_hash=$1 GROUP BY t.code`, hash[:]).Scan(&code, &ends)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			trialError(w)
+			return
+		}
+		w.Header().Set("Cache-Control", "no-store")
+		writeJSON(w, http.StatusOK, map[string]any{"code": code, "endsAt": nullableTime(ends)})
+		return
+	}
+	// The managed endpoint removes the trial credential when its lease expires.
+	if !s.nodeRequiresLease() {
+		writeError(w, http.StatusServiceUnavailable, "trial_unavailable", "试用线路暂未开放")
+		return
+	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		trialError(w)
@@ -58,12 +74,6 @@ func (s *server) startTrial(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusServiceUnavailable, "trial_unavailable", "试用线路暂未开放")
 			return
 		}
-		raw, err := randomToken(9)
-		if err != nil {
-			trialError(w)
-			return
-		}
-		code := strings.ToUpper(hex.EncodeToString([]byte(raw)[:8]))
 		tag := strings.ToLower(code)
 		if err = tx.QueryRowContext(ctx, `INSERT INTO users(email,password_hash) VALUES ($1,'!trial') RETURNING id::text`,
 			tag+"@trial.invalid").Scan(&user); err != nil {
@@ -85,6 +95,16 @@ func (s *server) startTrial(w http.ResponseWriter, r *http.Request) {
 		}
 	} else if err != nil {
 		trialError(w)
+		return
+	}
+	var ends sql.NullTime
+	if err := tx.QueryRowContext(ctx, `SELECT max(s.ends_at) FROM subscriptions s
+  JOIN plans p ON p.id=s.plan_id WHERE s.user_id=$1 AND p.code='trial-15m' AND s.status='active'`, user).Scan(&ends); err != nil {
+		trialError(w)
+		return
+	}
+	if !ends.Valid || !ends.Time.After(time.Now()) {
+		writeError(w, http.StatusGone, "trial_expired", "15 分钟试用已结束")
 		return
 	}
 	var active bool

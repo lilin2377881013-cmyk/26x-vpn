@@ -30,6 +30,11 @@ private final class TunnelBridgePlugin: NSObject, FlutterPlugin, FlutterStreamHa
 
   func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
     switch call.method {
+    case "deviceModel":
+      var hardware = utsname()
+      uname(&hardware)
+      let model = withUnsafeBytes(of: hardware.machine) { String(decoding: $0.prefix { $0 != 0 }, as: UTF8.self) }
+      result(model)
     case "deviceSystem":
       let device = UIDevice.current
       result(["osName": device.userInterfaceIdiom == .pad ? "iPadOS" : "iOS",

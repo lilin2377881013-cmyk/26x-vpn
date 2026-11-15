@@ -34,6 +34,7 @@ class MainActivity : FlutterActivity() {
     MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "26x/tunnel")
       .setMethodCallHandler { call, result ->
         when (call.method) {
+          "deviceModel" -> result.success(android.os.Build.MODEL)
           "status" -> result.success(TunnelRuntime.snapshot())
           "connect" -> requestConnect(call.argument("xrayJson"), result)
           "disconnect" -> requestDisconnect(result)

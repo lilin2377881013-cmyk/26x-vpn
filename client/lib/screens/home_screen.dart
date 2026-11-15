@@ -1,8 +1,9 @@
 import 'dart:async';
-import 'dart:io' show Platform;
+import 'dart:io' show Platform, Process;
 
 import 'package:material_ui/material_ui.dart';
-import 'package:flutter/services.dart' show Clipboard, ClipboardData;
+import 'package:flutter/services.dart'
+    show Clipboard, ClipboardData, MethodChannel;
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -53,6 +54,7 @@ class _HomeScreenState extends State<HomeScreen> {
     'US': '🇺🇸',
   };
   String? _message;
+  bool _deviceEnrollmentFailed = false;
   String? _planError;
 
   @override
@@ -68,14 +70,18 @@ class _HomeScreenState extends State<HomeScreen> {
     unawaited(widget.tunnel.initialize());
     _busy = true;
     unawaited(_restoreSession());
+    unawaited(_loadPlans());
+    unawaited(_identifyInstallation().catchError((Object _) {}));
   }
 
   Future<void> _restoreSession() async {
     try {
       if (await widget.api.restoreSession()) {
-        _account = widget.api.account;
-        await _loadDevices();
-        await _loadPlans();
+        final restored = widget.api.account;
+        if (restored?.trialCode == null && restored != null) {
+          _account = restored;
+          await _loadDevices();
+        }
       }
     } catch (error) {
       _message = error.toString();
@@ -86,6 +92,8 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
+    _trialTimer?.cancel();
+    _trialApi.close();
     _renewal?.cancel();
     _leaseExpiry?.cancel();
     unawaited(_tunnelSubscription?.cancel() ?? Future<void>.value());
@@ -95,6 +103,67 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   bool _registering = false;
+  bool _authRequested = false;
+  late final ApiClient _trialApi = widget.api.createTrialClient();
+  String? _installationCode;
+  DateTime? _trialEndsAt;
+  Device? _trialDevice;
+  ApiClient? _leaseApi;
+  Stopwatch? _leaseAge;
+  Duration _leaseRemaining = Duration.zero;
+  Timer? _trialTimer;
+
+  bool get _hasMembership => _account?.planTier != null;
+  bool get _trialExpired => _trialEndsAt?.isAfter(DateTime.now()) == false;
+  bool get _usingTrial =>
+      !_hasMembership && _trialDevice != null && !_trialExpired;
+  ApiClient get _vpnApi => _usingTrial ? _trialApi : widget.api;
+  Device? get _connectionDevice => _usingTrial ? _trialDevice : _device;
+
+  void _requestAuthentication({bool purchasing = false}) {
+    setState(() {
+      _tab = 2;
+      _authRequested = true;
+      _registering = false;
+      _message = purchasing ? '请先注册或登录，再开通会员。' : null;
+    });
+  }
+
+  void _updateTrial(String code, DateTime? endsAt) {
+    _trialTimer?.cancel();
+    _installationCode = code;
+    _trialEndsAt = endsAt;
+    if (endsAt != null && !_trialExpired) {
+      _trialTimer = Timer(endsAt.difference(DateTime.now()), () async {
+        if (!mounted) return;
+        if (_leaseApi == _trialApi) {
+          await widget.tunnel.disconnect();
+          await _releaseLease();
+        }
+        if (!mounted) return;
+        setState(() {
+          _trialDevice = null;
+          if (!_hasMembership) {
+            _nodes = [];
+            _selectedNode = null;
+            _message = '15 分钟试用已结束。';
+          }
+        });
+      });
+    }
+  }
+
+  Future<void> _identifyInstallation() async {
+    final identity = await _trialApi.identifyTrial(_platform);
+    if (mounted) {
+      setState(() {
+        if (_trialDevice == null &&
+            (identity.endsAt != null || _trialEndsAt == null)) {
+          _updateTrial(identity.code, identity.endsAt);
+        }
+      });
+    }
+  }
 
   Future<void> _signIn() async {
     setState(() {
@@ -105,12 +174,18 @@ class _HomeScreenState extends State<HomeScreen> {
       _account = _registering
           ? await widget.api.register(_email.text, _password.text)
           : await widget.api.signIn(_email.text, _password.text);
+      if (_hasMembership && _leaseApi == _trialApi) {
+        await widget.tunnel.disconnect();
+        await _releaseLease();
+        _selectedNode = null;
+      }
       await _loadDevices();
       unawaited(_loadPlans());
       if (mounted) {
         setState(() {
           _password.clear();
           _registering = false;
+          _authRequested = false;
         });
       }
     } catch (error) {
@@ -121,28 +196,39 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _startTrial() async {
+    if (_trialExpired) {
+      setState(() => _message = '15 分钟试用已结束，请注册或登录后开通会员。');
+      return;
+    }
     setState(() {
+      _tab = 0;
       _busy = true;
       _message = null;
     });
     try {
-      _account = await widget.api.startTrial(_platform);
-      await _loadDevices();
-      unawaited(_loadPlans());
+      final trial = await _trialApi
+          .startTrial(_platform)
+          .timeout(const Duration(seconds: 20));
+      if (!mounted) return;
+      final end = trial.account.subscriptionEndsAt;
+      if (end == null || !end.isAfter(DateTime.now())) {
+        throw const ApiException('15 分钟试用已结束。');
+      }
+      _updateTrial(trial.account.trialCode ?? _installationCode ?? '', end);
+      _trialDevice = trial.device;
+      await _loadNodes();
     } catch (error) {
       if (mounted) setState(() => _message = error.toString());
+      return;
     } finally {
       if (mounted) setState(() => _busy = false);
     }
+    if (mounted) await _connectTo(_selectedNode);
   }
 
   Future<void> _checkout(VpnPlan plan) async {
-    if (_account?.trialCode != null) {
-      setState(() => _message = '试用用户请在个人页面退出试用，再注册或登录后购买。');
-      return;
-    }
-    if (Platform.isIOS) {
-      setState(() => _message = '此 iOS 版本暂未开放购买。');
+    if (_account == null) {
+      _requestAuthentication(purchasing: true);
       return;
     }
     setState(() {
@@ -154,37 +240,7 @@ class _HomeScreenState extends State<HomeScreen> {
           .checkout(plan.code)
           .timeout(const Duration(seconds: 20));
       if (!mounted) return;
-      if (Platform.isWindows || Platform.isMacOS) {
-        await showDialog<void>(
-          context: context,
-          builder: (dialogContext) => AlertDialog(
-            title: const Text('支付宝扫码支付'),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                ColoredBox(
-                  color: Colors.white,
-                  child: SizedBox.square(
-                    dimension: 208,
-                    child: QrImageView(data: payUrl.toString(), size: 208),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                const Text('用手机支付宝扫一扫，完成后点击刷新会员状态。'),
-              ],
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(dialogContext).pop(),
-                child: const Text('关闭'),
-              ),
-            ],
-          ),
-        );
-      } else if (!await launchUrl(
-        payUrl,
-        mode: LaunchMode.externalApplication,
-      )) {
+      if (!await launchUrl(payUrl, mode: LaunchMode.externalApplication)) {
         throw const ApiException('无法打开支付页面，请稍后重试。');
       }
       if (mounted) {
@@ -211,14 +267,49 @@ class _HomeScreenState extends State<HomeScreen> {
         break;
       }
     }
+    if (_device case final Device device when _account?.trialCode == null) {
+      await widget.api.rememberLocalDevice(device.id);
+      if (device.label == _deviceLabel) {
+        final model = await _deviceModel();
+        if (model != device.label) {
+          try {
+            await widget.api.updateDeviceLabel(device.id, model);
+            final updated = Device(
+              id: device.id,
+              label: model,
+              platform: device.platform,
+              createdAt: device.createdAt,
+            );
+            _devices = _devices
+                .map((item) => item.id == updated.id ? updated : item)
+                .toList();
+            _device = updated;
+          } on ApiException {
+            // The existing connection credential remains usable.
+          }
+        }
+      }
+    }
+    if (_device == null && _account?.trialCode == null) {
+      try {
+        final device = await widget.api.registerDevice(
+          platform: _platform,
+          label: await _deviceModel(),
+        );
+        _device = device;
+        _devices = [..._devices, device];
+        if (_deviceEnrollmentFailed) _message = null;
+        _deviceEnrollmentFailed = false;
+      } catch (error) {
+        _deviceEnrollmentFailed = true;
+        _message = error.toString();
+      }
+    }
     final device = _device;
     if (device != null) unawaited(widget.api.syncDeviceSystem(device.id));
-    final trialExpired =
-        _account?.trialCode != null &&
-        _account?.subscriptionEndsAt?.isAfter(DateTime.now()) != true;
-    if (_device != null && !trialExpired) await _loadNodes();
-    if (trialExpired) _message = '15 分钟试用已结束。';
-    if (_device == null || trialExpired) {
+    if (_connectionDevice != null && (_hasMembership || _usingTrial)) {
+      await _loadNodes();
+    } else {
       _nodes = [];
       _selectedNode = null;
     }
@@ -227,45 +318,21 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _loadNodes() async {
     final previous = _selectedNode;
-    _nodes = await widget.api.loadNodes(deviceId: _device?.id);
-    _selectedNode =
-        (previous == null
-            ? null
-            : _nodes
-                      .where(
-                        (node) =>
-                            _regionCode(node) == _regionCode(previous) &&
-                            node.connectable,
-                      )
-                      .firstOrNull ??
-                  _nodes
-                      .where(
-                        (node) => _regionCode(node) == _regionCode(previous),
-                      )
-                      .firstOrNull) ??
-        _nodes.where((node) => node.connectable).firstOrNull ??
-        _nodes.firstOrNull;
-    if (mounted) setState(() {});
-  }
-
-  Future<void> _registerDevice() async {
-    setState(() {
-      _busy = true;
-      _message = null;
-    });
-    try {
-      final device = await widget.api.registerDevice(
-        platform: _platform,
-        label: _deviceLabel,
+    _nodes = await _vpnApi.loadNodes(deviceId: _connectionDevice?.id);
+    if (previous == null) {
+      _selectedNode =
+          _nodes.where((node) => node.connectable).firstOrNull ??
+          _nodes.firstOrNull;
+    } else {
+      final sameRegion = _nodes.where(
+        (node) => _regionCode(node) == _regionCode(previous),
       );
-      _devices = [..._devices, device];
-      _device = device;
-      await _loadNodes();
-    } catch (error) {
-      if (mounted) setState(() => _message = error.toString());
-    } finally {
-      if (mounted) setState(() => _busy = false);
+      _selectedNode =
+          sameRegion.where((node) => node.connectable).firstOrNull ??
+          sameRegion.firstOrNull ??
+          previous;
     }
+    if (mounted) setState(() {});
   }
 
   Future<void> _signOut() async {
@@ -283,13 +350,14 @@ class _HomeScreenState extends State<HomeScreen> {
         setState(() {
           _tab = 0;
           _account = null;
+          _authRequested = false;
           _devices = [];
           _nodes = [];
-          _plans = [];
           _device = null;
+          _deviceEnrollmentFailed = false;
+          _trialDevice = null;
           _selectedNode = null;
           _message = signOutError;
-          _planError = null;
         });
       }
     }
@@ -322,7 +390,12 @@ class _HomeScreenState extends State<HomeScreen> {
       if (device.id == _device?.id && _isConnected) {
         await widget.tunnel.disconnect();
       }
+      final isLocal = device.id == _device?.id;
       await widget.api.revokeDevice(device.id);
+      if (isLocal) {
+        await _signOut();
+        return;
+      }
       await _loadDevices();
     } catch (error) {
       if (mounted) setState(() => _message = error.toString());
@@ -456,85 +529,50 @@ class _HomeScreenState extends State<HomeScreen> {
     return '26x device';
   }
 
+  Future<String> _deviceModel() async {
+    try {
+      var model = '';
+      if (Platform.isMacOS) {
+        final result = await Process.run('/usr/sbin/sysctl', [
+          '-n',
+          'hw.model',
+        ]);
+        if (result.exitCode == 0) model = (result.stdout as String).trim();
+      } else if (Platform.isWindows) {
+        final result = await Process.run('reg.exe', [
+          'query',
+          r'HKLM\HARDWARE\DESCRIPTION\System\BIOS',
+          '/v',
+          'SystemProductName',
+        ]);
+        if (result.exitCode == 0) {
+          model =
+              RegExp(
+                r'SystemProductName\s+REG_SZ\s+([^\r\n]+)',
+              ).firstMatch(result.stdout as String)?.group(1)?.trim() ??
+              '';
+        }
+      } else {
+        model =
+            (await const MethodChannel(
+              '26x/tunnel',
+            ).invokeMethod<String>('deviceModel'))?.trim() ??
+            '';
+      }
+      if (model.isNotEmpty) return String.fromCharCodes(model.runes.take(80));
+    } on Exception {
+      // Use the platform name if a device does not report a hardware model.
+    }
+    return _deviceLabel;
+  }
+
   bool get _isConnecting =>
       _tunnelState.state == TunnelState.connecting ||
       _tunnelState.state == TunnelState.disconnecting;
   bool get _isConnected => _tunnelState.state == TunnelState.connected;
 
   @override
-  Widget build(BuildContext context) {
-    if (_account != null) return _signedInShell();
-    return Scaffold(
-      body: DecoratedBox(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [Color(0xFFF9FBFB), Color(0xFFE9F0EF)],
-          ),
-        ),
-        child: SafeArea(
-          child: Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 560),
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(22, 18, 22, 28),
-                child: Column(
-                  children: [
-                    _topBar(),
-                    const SizedBox(height: 24),
-                    Expanded(
-                      child: _busy
-                          ? const Center(child: CircularProgressIndicator())
-                          : _loginCard(),
-                    ),
-                    const SizedBox(height: 16),
-                    const Text(
-                      '26x · 私密连接',
-                      style: TextStyle(
-                        color: Color(0xFF718188),
-                        fontSize: 12,
-                        letterSpacing: 1.2,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _topBar() => Row(
-    children: [
-      Container(
-        width: 42,
-        height: 42,
-        decoration: BoxDecoration(
-          color: const Color(0xFF087E79),
-          borderRadius: BorderRadius.circular(14),
-        ),
-        child: const Icon(Icons.shield_outlined, color: Colors.white),
-      ),
-      const SizedBox(width: 12),
-      const Text(
-        '26x',
-        style: TextStyle(
-          fontSize: 24,
-          fontWeight: FontWeight.w800,
-          letterSpacing: -1,
-        ),
-      ),
-      const Spacer(),
-      IconButton(
-        onPressed: _busy ? null : _refresh,
-        tooltip: '刷新状态',
-        icon: const Icon(Icons.refresh_rounded, color: Color(0xFF52646B)),
-      ),
-    ],
-  );
+  Widget build(BuildContext context) => _signedInShell();
 
   Widget _loginCard() => SingleChildScrollView(
     child: _surface(
@@ -559,7 +597,7 @@ class _HomeScreenState extends State<HomeScreen> {
           const SizedBox(height: 8),
           Text(
             _registering ? '填写邮箱并设置至少 12 位的密码。' : '登录、注册或开始免费试用。',
-            style: const TextStyle(color: Color(0xFF66777D), height: 1.5),
+            style: const TextStyle(color: Color(0xFFAAB6C6), height: 1.5),
           ),
           const SizedBox(height: 26),
           TextField(
@@ -591,7 +629,8 @@ class _HomeScreenState extends State<HomeScreen> {
             child: FilledButton(
               onPressed: _busy ? null : _signIn,
               style: FilledButton.styleFrom(
-                backgroundColor: const Color(0xFF087E79),
+                backgroundColor: _gold,
+                foregroundColor: _pageColor,
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(15),
                 ),
@@ -602,7 +641,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       height: 20,
                       child: CircularProgressIndicator(
                         strokeWidth: 2,
-                        color: Colors.white,
+                        color: _pageColor,
                       ),
                     )
                   : Text(
@@ -626,13 +665,17 @@ class _HomeScreenState extends State<HomeScreen> {
               child: Text(_registering ? '已有账号，返回登录' : '注册新账号'),
             ),
           ),
-          if (!_registering)
-            Center(
-              child: TextButton(
-                onPressed: _busy ? null : _startTrial,
-                child: const Text('新用户免费试用 15 分钟'),
-              ),
+          Center(
+            child: TextButton(
+              onPressed: _busy
+                  ? null
+                  : () => setState(() {
+                      _authRequested = false;
+                      _message = null;
+                    }),
+              child: const Text('返回个人中心'),
             ),
+          ),
         ],
       ),
     ),
@@ -708,8 +751,14 @@ class _HomeScreenState extends State<HomeScreen> {
         child: ListView(
           padding: const EdgeInsets.fromLTRB(24, 24, 24, 32),
           children: [
-            if (_tab == 1) _plansPage() else _accountCard(),
-            if (_message != null) ...[
+            if (_tab == 1)
+              _plansPage()
+            else if (_account == null && _authRequested)
+              _loginCard()
+            else
+              _accountCard(),
+            if (_message != null &&
+                !(_tab == 2 && _account == null && _authRequested)) ...[
               const SizedBox(height: 12),
               _messageBox(_message!),
             ],
@@ -856,7 +905,7 @@ class _HomeScreenState extends State<HomeScreen> {
               child: Text(_busy ? '请稍候…' : '开通会员'),
             ),
           ),
-          if (!Platform.isIOS && _account?.trialCode == null)
+          if (_account != null)
             TextButton(
               onPressed: _busy ? null : _refresh,
               child: const Text('刷新会员状态'),
@@ -903,11 +952,6 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                 ),
               ),
-              const SizedBox(height: 10),
-              Text(
-                _quotaLabel(plan),
-                style: const TextStyle(color: _muted, fontSize: 12),
-              ),
             ],
           ),
         ),
@@ -947,22 +991,83 @@ class _HomeScreenState extends State<HomeScreen> {
     ],
   );
 
+  Widget _guestIdentity() {
+    final code = _installationCode;
+    return Row(
+      children: [
+        Expanded(
+          child: code == null
+              ? Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton(
+                    onPressed: _busy ? null : _refresh,
+                    child: const Text('加载游客识别码'),
+                  ),
+                )
+              : Text(
+                  '游客识别码 $code',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+        ),
+        const SizedBox(width: 12),
+        FilledButton(
+          onPressed: _busy ? null : _requestAuthentication,
+          style: FilledButton.styleFrom(
+            backgroundColor: _gold,
+            foregroundColor: const Color(0xFF292115),
+          ),
+          child: const Text('登录 / 注册'),
+        ),
+      ],
+    );
+  }
+
+  Widget _trialStatusCard() {
+    final expires = _trialEndsAt;
+    final status = expires == null
+        ? '可免费试用 15 分钟，首次使用时开始计时。'
+        : _trialExpired
+        ? '15 分钟试用已结束。'
+        : '试用截止 ${MaterialLocalizations.of(context).formatTimeOfDay(TimeOfDay.fromDateTime(expires.toLocal()))}';
+    return _surface(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('免费试用'),
+          Text(status),
+          if (!_hasMembership && !_trialExpired)
+            TextButton(
+              onPressed: _busy || _isConnecting || _isConnected
+                  ? null
+                  : _startTrial,
+              child: Text(expires == null ? '开始试用' : '继续试用'),
+            ),
+        ],
+      ),
+    );
+  }
+
   Widget _accountCard() {
-    final account = _account!;
-    final endsAt = account.subscriptionEndsAt;
+    final account = _account;
+    final endsAt = account?.subscriptionEndsAt;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Text(
-          account.trialCode == null
-              ? account.email
-              : '试用识别码 ${account.trialCode}',
-          style: const TextStyle(
-            color: Colors.white,
-            fontSize: 18,
-            fontWeight: FontWeight.w600,
+        if (account == null)
+          _guestIdentity()
+        else
+          Text(
+            account.email,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 18,
+              fontWeight: FontWeight.w600,
+            ),
           ),
-        ),
         const SizedBox(height: 20),
         Container(
           padding: const EdgeInsets.all(22),
@@ -976,7 +1081,7 @@ class _HomeScreenState extends State<HomeScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                account.planName ?? '暂未开通套餐',
+                account?.planName ?? '暂未开通套餐',
                 style: const TextStyle(
                   color: Color(0xFF292115),
                   fontSize: 21,
@@ -986,9 +1091,7 @@ class _HomeScreenState extends State<HomeScreen> {
               if (endsAt != null) ...[
                 const SizedBox(height: 8),
                 Text(
-                  account.trialCode == null
-                      ? '有效期至 ${_date(endsAt)}'
-                      : '试用截止 ${MaterialLocalizations.of(context).formatTimeOfDay(TimeOfDay.fromDateTime(endsAt.toLocal()))}',
+                  '有效期至 ${_date(endsAt)}',
                   style: const TextStyle(color: Color(0xFF4C3920)),
                 ),
               ],
@@ -1004,37 +1107,38 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ),
         const SizedBox(height: 20),
-        ListTile(
-          leading: const Icon(Icons.lock_outline),
-          title: const Text('修改密码'),
-          trailing: const Icon(Icons.chevron_right),
-          onTap: _busy || account.trialCode != null ? null : _changePassword,
-        ),
-        const Divider(height: 1),
-        ExpansionTile(
-          leading: const Icon(Icons.devices_outlined),
-          title: const Text('设备管理'),
-          subtitle: Text(_device == null ? '本机未登记' : '${_devices.length} 台已登记'),
-          children: [
-            if (_device == null)
-              ListTile(
-                title: const Text('注册本机设备'),
-                onTap: _busy ? null : _registerDevice,
-              ),
-            for (final device in _devices)
-              ListTile(
-                leading: Icon(_platformIcon(device.platform)),
-                title: Text(
-                  '${device.label}${device.id == _device?.id ? ' · 本机' : ''}',
+        if (!_hasMembership) ...[
+          _trialStatusCard(),
+          const SizedBox(height: 20),
+        ],
+        if (account != null) ...[
+          ListTile(
+            leading: const Icon(Icons.lock_outline),
+            title: const Text('修改密码'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: _busy ? null : _changePassword,
+          ),
+          const Divider(height: 1),
+          ExpansionTile(
+            leading: const Icon(Icons.devices_outlined),
+            title: const Text('已登录设备'),
+            subtitle: Text('${_devices.length} 台已登记'),
+            children: [
+              for (final device in _devices)
+                ListTile(
+                  leading: Icon(_platformIcon(device.platform)),
+                  title: Text(
+                    '${device.label}${device.id == _device?.id ? ' · 本机' : ''}',
+                  ),
+                  trailing: TextButton(
+                    onPressed: _busy ? null : () => _revokeDevice(device),
+                    child: const Text('移除'),
+                  ),
                 ),
-                trailing: TextButton(
-                  onPressed: _busy ? null : () => _revokeDevice(device),
-                  child: const Text('撤销'),
-                ),
-              ),
-          ],
-        ),
-        const Divider(height: 1),
+            ],
+          ),
+          const Divider(height: 1),
+        ],
         ListTile(
           leading: const Icon(Icons.qr_code_rounded),
           title: const Text('防伪防丢失'),
@@ -1046,14 +1150,16 @@ class _HomeScreenState extends State<HomeScreen> {
           leading: const Icon(Icons.chat_bubble_outline),
           title: const Text('联系我们'),
           trailing: const Icon(Icons.chevron_right),
-          onTap: _showSupport,
+          onTap: account == null ? _requestAuthentication : _showSupport,
         ),
-        const Divider(height: 1),
-        ListTile(
-          leading: const Icon(Icons.logout_rounded),
-          title: const Text('退出登录'),
-          onTap: _busy ? null : _signOut,
-        ),
+        if (account != null) ...[
+          const Divider(height: 1),
+          ListTile(
+            leading: const Icon(Icons.logout_rounded),
+            title: const Text('退出登录'),
+            onTap: _busy ? null : _signOut,
+          ),
+        ],
       ],
     );
   }
@@ -1169,7 +1275,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final node = _selectedNode;
     final region = node == null ? null : _regionCode(node);
     final label = node == null ? '选择地区' : _nodeRegions[region] ?? node.name;
-    final isTrial = _account?.trialCode != null;
+    final isTrial = _usingTrial;
     final status = switch (_tunnelState.state) {
       TunnelState.connected => '已连接',
       TunnelState.connecting => '正在连接',
@@ -1210,7 +1316,12 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                     const SizedBox(height: 24),
                     OutlinedButton(
-                      onPressed: _busy || _isConnecting || _device == null
+                      onPressed:
+                          _busy ||
+                              _isConnecting ||
+                              (_hasMembership &&
+                                  _connectionDevice == null &&
+                                  !_isConnected)
                           ? null
                           : _toggleTunnel,
                       style: OutlinedButton.styleFrom(
@@ -1250,21 +1361,30 @@ class _HomeScreenState extends State<HomeScreen> {
                                 ? status
                                 : _isConnected
                                 ? '断开连接'
+                                : !_hasMembership && !isTrial
+                                ? (_trialExpired
+                                      ? '开通会员'
+                                      : (_trialEndsAt == null
+                                            ? (_trialEndsAt == null
+                                                  ? '免费试用'
+                                                  : '继续试用')
+                                            : '继续试用'))
                                 : '连接 VPN',
                           ),
                         ],
                       ),
                     ),
                     const SizedBox(height: 36),
-                    if (_device == null)
-                      FilledButton.tonalIcon(
-                        onPressed: _busy ? null : _registerDevice,
-                        icon: const Icon(Icons.add_rounded),
-                        label: const Text('注册本机设备'),
+                    if (_device == null && _deviceEnrollmentFailed)
+                      TextButton(
+                        onPressed: _busy
+                            ? null
+                            : () => setState(() => _tab = 2),
+                        child: const Text('管理已登录设备'),
                       )
                     else if (isTrial)
                       const Text('15 分钟试用', style: TextStyle(color: muted))
-                    else
+                    else if (_device != null && _account?.planTier != null)
                       OutlinedButton(
                         onPressed: _busy || _isConnecting ? null : _showRegions,
                         style: OutlinedButton.styleFrom(
@@ -1434,6 +1554,21 @@ class _HomeScreenState extends State<HomeScreen> {
       }
       return;
     }
+    if (!_hasMembership && !_usingTrial) {
+      if (_trialExpired) {
+        if (_account == null) {
+          _requestAuthentication(purchasing: true);
+        } else {
+          setState(() {
+            _tab = 1;
+            _message = '15 分钟试用已结束，请开通会员后连接。';
+          });
+        }
+      } else {
+        await _startTrial();
+      }
+      return;
+    }
     await _connectTo(_selectedNode);
   }
 
@@ -1442,7 +1577,8 @@ class _HomeScreenState extends State<HomeScreen> {
     bool switchRegion = false,
   }) async {
     if (_busy) return;
-    final device = _device;
+    final device = _connectionDevice;
+    final api = _vpnApi;
     if (requested == null || device == null) {
       setState(() => _message = '当前没有可连接节点。');
       return;
@@ -1473,8 +1609,7 @@ class _HomeScreenState extends State<HomeScreen> {
       }
       await _loadNodes();
       final region = _regionCode(requested);
-      final regional =
-          widget.api.regionalLeases && _nodeRegions.containsKey(region);
+      final regional = api.regionalLeases && _nodeRegions.containsKey(region);
       VpnNode? selectedEndpoint(String? endpointId) {
         if (endpointId != null) {
           return _nodes
@@ -1488,9 +1623,9 @@ class _HomeScreenState extends State<HomeScreen> {
 
       var node = selectedEndpoint(null);
       if (!mounted) return;
-      final requiresLease = widget.api.connectionLeases;
+      final requiresLease = api.connectionLeases;
       if (node == null || (!requiresLease && !node.connectable)) {
-        setState(() => _message = '所选节点已不可用，请重新选择。');
+        setState(() => _message = '所选地区暂不可用，请稍后重试或手动切换。');
         return;
       }
       if (requiresLease) {
@@ -1498,15 +1633,16 @@ class _HomeScreenState extends State<HomeScreen> {
           throw const ApiException('上次连接名额尚未释放，请稍后重试。');
         }
         final clock = Stopwatch()..start();
-        final lease = await widget.api.reserveConnection(
+        final lease = await api.reserveConnection(
           device.id,
           region: regional ? region : null,
         );
         if (!mounted) {
-          await widget.api.releaseConnection(lease);
+          await api.releaseConnection(lease);
           return;
         }
         _leaseInvalid = false;
+        _leaseApi = api;
         _trackLease(lease, clock.elapsed);
         if (regional && lease.endpointId == null) {
           throw StateError('服务器未分配连接线路，请重试');
@@ -1561,6 +1697,8 @@ class _HomeScreenState extends State<HomeScreen> {
     _renewal?.cancel();
     _leaseExpiry?.cancel();
     final remaining = lease.validFor - elapsed;
+    _leaseRemaining = remaining;
+    _leaseAge = Stopwatch()..start();
     _leaseExpiry = Timer(remaining, () => unawaited(_leaseLost(lease)));
     _scheduleRenewal(lease, const Duration(seconds: 30));
   }
@@ -1569,7 +1707,7 @@ class _HomeScreenState extends State<HomeScreen> {
     _renewal = Timer(delay, () async {
       final clock = Stopwatch()..start();
       try {
-        final next = await widget.api.reserveConnection(
+        final next = await (_leaseApi ?? _vpnApi).reserveConnection(
           lease.deviceId,
           token: lease.token,
         );
@@ -1607,15 +1745,25 @@ class _HomeScreenState extends State<HomeScreen> {
     if (pending != null) return pending;
     final lease = _lease;
     if (lease == null) return true;
+    if ((_leaseAge?.elapsed ?? Duration.zero) >= _leaseRemaining) {
+      _lease = null;
+      _leaseApi = null;
+      _renewal?.cancel();
+      _leaseExpiry?.cancel();
+      return true;
+    }
     _renewal?.cancel();
     _leaseExpiry?.cancel();
-    final release = widget.api
+    final release = (_leaseApi ?? _vpnApi)
         .releaseConnection(lease)
         .timeout(const Duration(seconds: 5))
         .then((_) => true, onError: (Object _) => false);
     _releaseInFlight = release;
     final released = await release;
-    if (released && identical(_lease, lease)) _lease = null;
+    if (released && identical(_lease, lease)) {
+      _lease = null;
+      _leaseApi = null;
+    }
     if (identical(release, _releaseInFlight)) _releaseInFlight = null;
     return released;
   }
@@ -1628,8 +1776,15 @@ class _HomeScreenState extends State<HomeScreen> {
     try {
       if (_account == null) {
         await widget.tunnel.initialize();
+        await Future.wait([_identifyInstallation(), _loadPlans()]);
       } else {
+        final hadMembership = _hasMembership;
         _account = await widget.api.loadAccount();
+        if (!hadMembership && _hasMembership && _leaseApi == _trialApi) {
+          await widget.tunnel.disconnect();
+          await _releaseLease();
+          _selectedNode = null;
+        }
         await _loadDevices();
         await _loadPlans();
       }
@@ -1647,9 +1802,9 @@ class _HomeScreenState extends State<HomeScreen> {
     width: double.infinity,
     padding: padding,
     decoration: BoxDecoration(
-      color: Colors.white,
+      color: _panelColor,
       borderRadius: BorderRadius.circular(22),
-      border: Border.all(color: const Color(0xFFE8EEEE)),
+      border: Border.all(color: const Color(0xFF394451)),
       boxShadow: const [
         BoxShadow(
           color: Color(0x080D292E),
@@ -1666,18 +1821,18 @@ class _HomeScreenState extends State<HomeScreen> {
         labelText: label,
         prefixIcon: Icon(icon, size: 19),
         filled: true,
-        fillColor: const Color(0xFFF7F9F9),
+        fillColor: const Color(0xFF202A36),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(14),
           borderSide: BorderSide.none,
         ),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(14),
-          borderSide: const BorderSide(color: Color(0xFFE4EBEB)),
+          borderSide: const BorderSide(color: Color(0xFF394451)),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(14),
-          borderSide: const BorderSide(color: Color(0xFF087E79), width: 1.4),
+          borderSide: const BorderSide(color: _gold, width: 1.4),
         ),
       );
 
@@ -1700,10 +1855,6 @@ class _HomeScreenState extends State<HomeScreen> {
 
   String _date(DateTime value) =>
       '${value.year}-${value.month.toString().padLeft(2, '0')}-${value.day.toString().padLeft(2, '0')}';
-
-  String _quotaLabel(VpnPlan plan) => plan.quotaBytes == null
-      ? '不限流量'
-      : '${(plan.quotaBytes! / 1000000000).toStringAsFixed(0)} GB';
 
   String _priceLabel(VpnPlan plan) => plan.priceCents == null
       ? '待定价'

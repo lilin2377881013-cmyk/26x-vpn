@@ -95,8 +95,10 @@ func (s *server) routes() http.Handler {
 	mux.HandleFunc("GET /api/v1/admin/orders", s.requireAdmin(s.listPaymentOrders, "owner", "operations"))
 	mux.HandleFunc("GET /api/v1/me", s.requireUser(s.userMe))
 	mux.HandleFunc("GET /api/v1/me/plans", s.requireUser(s.listAvailablePlans))
+	mux.HandleFunc("GET /api/v1/plans", s.listAvailablePlans)
 	mux.HandleFunc("GET /api/v1/me/devices", s.requireUser(s.listMyDevices))
 	mux.HandleFunc("POST /api/v1/me/devices", s.requireUser(s.withUserCSRF(s.registerDevice)))
+	mux.HandleFunc("PUT /api/v1/me/devices/{id}/label", s.requireUser(s.withUserCSRF(s.updateDeviceLabel)))
 	mux.HandleFunc("PUT /api/v1/me/devices/{id}/system", s.requireUser(s.withUserCSRF(s.updateDeviceSystem)))
 	mux.HandleFunc("DELETE /api/v1/me/devices/{id}", s.requireUser(s.withUserCSRF(s.revokeDevice)))
 	mux.HandleFunc("GET /api/v1/client/bootstrap", s.requireUser(s.clientBootstrap))
@@ -415,7 +417,11 @@ func (s *server) listAvailablePlans(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "internal_error", "Unable to read available plans")
 			return
 		}
-		items = append(items, map[string]any{"id": id, "code": code, "name": name, "tier": tier, "durationDays": durationDays, "priceCents": nullableInt64(price), "currency": currency, "quotaBytes": nullableInt64(quota), "maxDevices": maxDevices})
+		item := map[string]any{"id": id, "code": code, "name": name, "tier": tier, "durationDays": durationDays, "priceCents": nullableInt64(price), "currency": currency, "maxDevices": maxDevices}
+		if r.URL.Path == "/api/v1/me/plans" {
+			item["quotaBytes"] = nullableInt64(quota)
+		}
+		items = append(items, item)
 	}
 	if err := rows.Err(); err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Unable to read available plans")
@@ -495,12 +501,13 @@ func (s *server) listMyDevices(w http.ResponseWriter, r *http.Request) {
 func (s *server) registerDevice(w http.ResponseWriter, r *http.Request) {
 	current := actorFromContext(r)
 	var input struct {
-		Platform    string `json:"platform"`
-		Label       string `json:"label"`
-		AppVersion  string `json:"appVersion"`
-		CoreVersion string `json:"coreVersion"`
+		Platform          string `json:"platform"`
+		Label             string `json:"label"`
+		AppVersion        string `json:"appVersion"`
+		CoreVersion       string `json:"coreVersion"`
+		InstallationToken string `json:"installationToken"`
 	}
-	if err := decodeJSON(w, r, &input); err != nil || !validPlatform(input.Platform) || len(strings.TrimSpace(input.Label)) < 1 || len(input.Label) > 80 {
+	if err := decodeJSON(w, r, &input); err != nil || !validPlatform(input.Platform) || len(strings.TrimSpace(input.Label)) < 1 || len([]rune(input.Label)) > 80 || (input.InstallationToken != "" && !installationTokenPattern.MatchString(input.InstallationToken)) {
 		writeError(w, http.StatusBadRequest, "invalid_device", "Device fields are invalid")
 		return
 	}
@@ -517,16 +524,29 @@ func (s *server) registerDevice(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "sign_in_required", "Sign in to your 26x account")
 		return
 	}
-	var deviceLimit int
-	err = tx.QueryRowContext(r.Context(), `SELECT p.max_devices FROM subscriptions s JOIN plans p ON p.id = s.plan_id
-		WHERE s.user_id = $1 AND s.status = 'active' AND s.starts_at <= now() AND (s.ends_at IS NULL OR s.ends_at > now())
-		ORDER BY s.ends_at DESC NULLS FIRST LIMIT 1`, current.id).Scan(&deviceLimit)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			writeError(w, http.StatusForbidden, "subscription_required", "An active 26x subscription is required to register a device")
-		} else {
-			writeError(w, http.StatusInternalServerError, "internal_error", "Unable to check device limit")
+	if input.InstallationToken != "" {
+		var id string
+		err = tx.QueryRowContext(r.Context(), `UPDATE devices SET last_seen_at=now(), label=$4
+   WHERE user_id=$1 AND installation_token=$2 AND platform=$3 AND revoked_at IS NULL RETURNING id::text`,
+			current.id, input.InstallationToken, input.Platform, strings.TrimSpace(input.Label)).Scan(&id)
+		if err == nil {
+			if err = tx.Commit(); err == nil {
+				writeJSON(w, http.StatusOK, map[string]any{"id": id, "platform": input.Platform, "label": strings.TrimSpace(input.Label)})
+				return
+			}
 		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			writeError(w, http.StatusInternalServerError, "internal_error", "Unable to restore device")
+			return
+		}
+	}
+	var deviceLimit int
+	err = tx.QueryRowContext(r.Context(), `SELECT COALESCE((SELECT CASE WHEN p.code='trial-15m' THEN 1 WHEN p.tier='premium' THEN 6 ELSE 3 END
+  FROM subscriptions s JOIN plans p ON p.id=s.plan_id
+  WHERE s.user_id=$1 AND s.status='active' AND s.starts_at<=now() AND (s.ends_at IS NULL OR s.ends_at>now())
+  ORDER BY s.ends_at DESC NULLS FIRST LIMIT 1),3)`, current.id).Scan(&deviceLimit)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "Unable to check device limit")
 		return
 	}
 	var count int
@@ -539,8 +559,8 @@ func (s *server) registerDevice(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var id string
-	err = tx.QueryRowContext(r.Context(), `INSERT INTO devices(user_id, platform, label, app_version, core_version, last_seen_at)
-		VALUES ($1, $2, $3, NULLIF($4, ''), NULLIF($5, ''), now()) RETURNING id::text`, current.id, input.Platform, strings.TrimSpace(input.Label), input.AppVersion, input.CoreVersion).Scan(&id)
+	err = tx.QueryRowContext(r.Context(), `INSERT INTO devices(user_id, platform, label, app_version, core_version, last_seen_at, installation_token)
+		VALUES ($1, $2, $3, NULLIF($4, ''), NULLIF($5, ''), now(), NULLIF($6, '')) RETURNING id::text`, current.id, input.Platform, strings.TrimSpace(input.Label), input.AppVersion, input.CoreVersion, input.InstallationToken).Scan(&id)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Unable to register device")
 		return

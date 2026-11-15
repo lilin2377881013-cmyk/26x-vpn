@@ -364,3 +364,36 @@ export function DownloadSettings() {
     )}
   </Page>;
 }
+
+type PaymentOrder = {
+  orderNo: string; providerOrderNo: string | null; email: string; plan: string;
+  product: string; amountCents: number; createdAt: string; paidAt: string | null;
+  status: "created" | "unconfirmed" | "paid";
+};
+
+const paymentStatuses = { created: "未取得通道单号", unconfirmed: "未确认到账", paid: "已到账" };
+const yuan = new Intl.NumberFormat("zh-CN", { style: "currency", currency: "CNY" });
+
+export function PaymentOrders() {
+  const [page, setPage] = useState(1);
+  const [refresh, setRefresh] = useState(0);
+  const { data, error } = useData<{ items: PaymentOrder[]; hasMore: boolean }>(`/orders?page=${page}&refresh=${refresh}`);
+  return <Page title="支付订单" action={<button onClick={() => setRefresh(refresh + 1)}>刷新</button>}>
+    {error ? <ErrorMessage message={error} /> : !data ? <p>正在加载订单…</p> :
+      data.items.length === 0 ? <p>暂无订单。</p> : <div className={styles.card} style={{ overflowX: "auto" }}>
+        <table><thead><tr><th>订单号</th><th>用户</th><th>套餐</th><th>金额</th><th>渠道</th><th>状态</th><th>下单时间</th><th>到账时间</th></tr></thead>
+          <tbody>{data.items.map((order) => <tr key={order.orderNo}>
+            <td>{order.orderNo}{order.providerOrderNo && <small>通道单号 {order.providerOrderNo}</small>}</td>
+            <td>{order.email}</td><td>{order.plan}</td><td>{yuan.format(order.amountCents / 100)}</td>
+            <td>{order.product}</td><td>{paymentStatuses[order.status]}</td>
+            <td>{dateLabel(order.createdAt)}</td><td>{dateLabel(order.paidAt)}</td>
+          </tr>)}</tbody>
+        </table>
+      </div>}
+    <div>
+      <button disabled={page === 1} onClick={() => setPage(page - 1)}>上一页</button>{" "}
+      <span>第 {page} 页</span>{" "}
+      <button disabled={!data?.hasMore} onClick={() => setPage(page + 1)}>下一页</button>
+    </div>
+  </Page>;
+}

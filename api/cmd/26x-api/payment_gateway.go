@@ -24,6 +24,7 @@ const paymentNotifyPath = "/api/v1/payments/juliang/notify"
 
 type paymentGateway struct {
 	apiOrigin, merchant, secret, product, notifyURL string
+	cashierOrigin                                   string
 	client                                          *http.Client
 	callbackIPs                                     map[string]struct{}
 }
@@ -40,6 +41,7 @@ func loadPaymentGateway() (*paymentGateway, error) {
 		notifyURL: os.Getenv("JULIANG_NOTIFY_URL"),
 		client:    &http.Client{Timeout: 8 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }},
 	}
+	g.cashierOrigin = os.Getenv("JULIANG_CASHIER_ORIGIN")
 	notify, err := url.Parse(g.notifyURL)
 	if err != nil || !validPaymentURL(g.notifyURL) || notify.Path != paymentNotifyPath ||
 		g.merchant == "" || g.secret == "" || g.product == "P0000" {

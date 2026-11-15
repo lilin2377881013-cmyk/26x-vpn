@@ -64,8 +64,9 @@ func (s *server) checkout(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadGateway, "checkout_failed", "无法打开支付页面，请稍后重试")
 		return
 	}
+	payURL := g.checkoutURL(provider.URL.PayURL, provider.URL.Expire)
 	if !g.matches(provider, orderNo, g.product, amount) || provider.Status != "PROCESSING" ||
-		!validPaymentURL(provider.URL.PayURL) || provider.URL.Expire <= time.Now().UnixMilli() {
+		payURL == "" || provider.URL.Expire <= time.Now().UnixMilli() {
 		s.logger.Warn("unexpected payment init response", "order", orderNo)
 		writeError(w, http.StatusBadGateway, "checkout_failed", "支付链接不可用")
 		return
@@ -83,7 +84,7 @@ func (s *server) checkout(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "checkout_failed", "无法保存订单")
 		return
 	}
-	writeJSON(w, http.StatusCreated, map[string]any{"orderNo": orderNo, "payUrl": provider.URL.PayURL,
+	writeJSON(w, http.StatusCreated, map[string]any{"orderNo": orderNo, "payUrl": payURL,
 		"expiresAt": time.UnixMilli(provider.URL.Expire).UTC().Format(time.RFC3339)})
 }
 

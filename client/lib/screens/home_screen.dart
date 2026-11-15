@@ -150,7 +150,9 @@ class _HomeScreenState extends State<HomeScreen> {
       _message = null;
     });
     try {
-      final payUrl = await widget.api.checkout(plan.code);
+      final payUrl = await widget.api
+          .checkout(plan.code)
+          .timeout(const Duration(seconds: 20));
       if (!mounted) return;
       if (Platform.isWindows || Platform.isMacOS) {
         await showDialog<void>(
@@ -162,7 +164,10 @@ class _HomeScreenState extends State<HomeScreen> {
               children: [
                 ColoredBox(
                   color: Colors.white,
-                  child: QrImageView(data: payUrl.toString(), size: 208),
+                  child: SizedBox.square(
+                    dimension: 208,
+                    child: QrImageView(data: payUrl.toString(), size: 208),
+                  ),
                 ),
                 const SizedBox(height: 12),
                 const Text('用手机支付宝扫一扫，完成后点击刷新会员状态。'),
@@ -184,6 +189,10 @@ class _HomeScreenState extends State<HomeScreen> {
       }
       if (mounted) {
         setState(() => _message = '支付完成后请返回 26x，点击刷新会员状态。');
+      }
+    } on TimeoutException {
+      if (mounted) {
+        setState(() => _message = '下单等待超时，请稍后再试。');
       }
     } catch (error) {
       if (mounted) setState(() => _message = error.toString());

@@ -80,6 +80,11 @@ func (s *server) routes() http.Handler {
 		mux.HandleFunc("GET "+item.path, s.requireAdmin(s.trafficLimits(item.node, false), "owner", "operations"))
 		mux.HandleFunc("PUT "+item.path, s.requireAdmin(s.withCSRF(s.trafficLimits(item.node, true)), "owner", "operations"))
 	}
+	mux.HandleFunc("GET /api/v1/referrals/{code}", s.referralVisit)
+	mux.HandleFunc("GET /api/v1/referrals/{code}/downloads/{channel}", s.referralDownload)
+	mux.HandleFunc("GET /api/v1/admin/referrals", s.requireAdmin(s.listReferrals, "owner", "operations"))
+	mux.HandleFunc("POST /api/v1/admin/referrals", s.requireAdmin(s.withCSRF(s.createReferral), "owner", "operations"))
+	mux.HandleFunc("GET /api/v1/admin/referrals/{code}", s.requireAdmin(s.referralStats, "owner", "operations"))
 	mux.HandleFunc("GET /api/v1/downloads", s.listDownloads)
 	mux.HandleFunc("GET /api/v1/admin/downloads", s.requireAdmin(s.listDownloads, "owner", "operations"))
 	mux.HandleFunc("PUT /api/v1/admin/downloads/{channel}", s.requireAdmin(s.withCSRF(s.saveDownloads), "owner", "operations"))

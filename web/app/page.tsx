@@ -26,14 +26,16 @@ async function downloadLinks(): Promise<Record<string, string>> {
   return {};
 }
 
-export default async function HomePage() {
-  const links = await downloadLinks();
+export default async function HomePage({ searchParams }: {
+  searchParams: Promise<{ ref?: string | string[] }>;
+}) {
+  const [links, { ref }] = await Promise.all([downloadLinks(), searchParams]);
+  const referral = typeof ref === "string" && /^[A-Za-z0-9_-]{16}$/.test(ref) ? ref : null;
   return (
     <main className="site-shell final-site" id="top">
       <nav className="topbar wrap" aria-label="主导航">
         <a className="brand" href="#top" aria-label="26x 首页"><span className="brand-mark">26</span><span className="brand-x">x</span><span className="brand-domain">VPN</span></a>
         <div className="nav-links"><a href="#features">功能</a><a href="#downloads">下载</a><a href="/support">帮助</a></div>
-        <a className="button button-small" href="/account/login">账户登录</a>
       </nav>
       <section className="hero wrap">
         <div className="hero-copy">
@@ -57,7 +59,7 @@ export default async function HomePage() {
                   const address = links[id];
                   const store = id === "ios-store";
                   return <div className="download-option" key={id}>
-                    {address ? <a className="button" href={address}>{label}</a>
+                    {address ? <a className="button" href={referral ? `/api/v1/referrals/${referral}/downloads/${id}` : address}>{label}</a>
                       : <button className="button" type="button" disabled>{label}</button>}
                     {store && <span className="download-tax">商店税贵10%</span>}
                   </div>;

@@ -397,3 +397,81 @@ export function PaymentOrders() {
     </div>
   </Page>;
 }
+
+type Referral = { code: string; name: string; visits: number; downloads: number };
+type ReferralMetric = { day: string; device: string; channel: string; count: number };
+const referralChannels: Record<string, string> = {
+  "": "官网访问", "ios-tf": "TestFlight", "ios-store": "App Store",
+  android: "Android 下载", macos: "macOS 下载", windows: "Windows 下载",
+};
+
+function ReferralReport({ code }: { code: string }) {
+  const { data, error } = useData<{ items: ReferralMetric[] }>(`/referrals/${code}`);
+  return <section className={styles.card} aria-label="代理统计明细" style={{ overflowX: "auto" }}>
+    <h2>最近 30 天</h2>
+    {error ? <ErrorMessage message={error} /> : !data ? <p>正在读取明细…</p> :
+      data.items.length === 0 ? <p>暂无访问或下载记录。</p> :
+      <table><thead><tr><th>日期（北京时间）</th><th>访客设备</th><th>事件</th><th>次数</th></tr></thead>
+        <tbody>{data.items.map(({ day, device, channel, count }) =>
+          <tr key={JSON.stringify([day, device, channel])}>
+            <td>{day}</td><td>{device}</td><td>{referralChannels[channel] ?? channel}</td><td>{count}</td>
+          </tr>)}</tbody></table>}
+  </section>;
+}
+
+export function ReferralLinks() {
+  const [refresh, setRefresh] = useState(0);
+  const [selected, setSelected] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState("");
+  const { data, error } = useData<{ items: Referral[] }>(`/referrals?refresh=${refresh}`);
+
+  async function create(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    setStatus("");
+    setBusy(true);
+    try {
+      const item = await write<Referral>("/referrals", "POST", { name: new FormData(form).get("name") });
+      form.reset();
+      setSelected(item.code);
+      setRefresh((value) => value + 1);
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "无法生成代理链接");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function copy(link: string) {
+    try {
+      await navigator.clipboard.writeText(new URL(link, window.location.origin).href);
+      setStatus("已复制代理链接");
+    } catch {
+      setStatus("请右键点击代理链接，选择复制链接地址");
+    }
+  }
+
+  return <Page title="代理推广" action={<button onClick={() => setRefresh(refresh + 1)}>刷新</button>}>
+    <form className={styles.card + " admin-form"} onSubmit={create}>
+      <label>代理名称<input name="name" required maxLength={80} /></label>
+      <div><button className="primary-action" disabled={busy}>{busy ? "生成中…" : "生成代理链接"}</button></div>
+      {status && <p role="status">{status}</p>}
+    </form>
+    {error ? <ErrorMessage message={error} /> : !data ? <p>正在加载代理数据…</p> :
+      data.items.length === 0 ? <p>暂无代理链接。</p> : <div className={styles.card} style={{ overflowX: "auto" }}>
+        <table><thead><tr><th>代理</th><th>推广链接</th><th>访问次数</th><th>下载点击</th><th>统计明细</th></tr></thead>
+          <tbody>{data.items.map((item) => {
+            const link = `/api/v1/referrals/${item.code}`;
+            return <tr key={item.code}>
+              <td>{item.name}</td>
+              <td><a href={link}>打开链接</a>{" "}<button onClick={() => copy(link)}>复制</button></td>
+              <td>{item.visits}</td><td>{item.downloads}</td>
+              <td><button aria-pressed={selected === item.code} onClick={() => setSelected(item.code)}>查看</button></td>
+            </tr>;
+          })}</tbody>
+        </table>
+      </div>}
+    {selected && <ReferralReport key={`${selected}:${refresh}`} code={selected} />}
+  </Page>;
+}

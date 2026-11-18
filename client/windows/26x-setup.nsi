@@ -20,6 +20,11 @@ Function .onInit
     MessageBox MB_ICONSTOP "此安装包需要 64 位 Windows。"
     Abort
   ${EndIf}
+  StrCpy $INSTDIR "$PROGRAMFILES64\26x VPN"
+FunctionEnd
+
+Function un.onInit
+  StrCpy $INSTDIR "$PROGRAMFILES64\26x VPN"
 FunctionEnd
 
 Section "26x VPN"

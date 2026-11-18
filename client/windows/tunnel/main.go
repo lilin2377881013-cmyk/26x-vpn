@@ -92,8 +92,39 @@ func configure(raw []byte, routes []string) (string, error) {
 	}
 	settings["autoSystemRoutingTable"] = routes
 	settings["autoOutboundsInterface"] = "auto"
-	settings["dns"] = []string{"1.1.1.1", "2606:4700:4700::1111"}
+	// Give Windows IPv4 DNS targets. Translate their port 53 traffic into
+	// DNS-over-HTTPS inside Xray so the node only needs to forward TCP 443.
+	settings["dns"] = []string{"1.1.1.1", "1.0.0.1"}
 	settings["autoSystemWfpBlockLeak"] = []string{"dns", "misconfigtun"}
+	routing, ok := config["routing"].(map[string]any)
+	if !ok {
+		return "", errors.New("missing routing configuration")
+	}
+	rules, ok := routing["rules"].([]any)
+	if !ok {
+		return "", errors.New("missing routing rules")
+	}
+	outbounds, ok := config["outbounds"].([]any)
+	if !ok || len(outbounds) == 0 {
+		return "", errors.New("missing outbounds")
+	}
+	config["dns"] = map[string]any{
+		"tag": "26x-doh",
+		"servers": []string{
+			"https://1.1.1.1/dns-query",
+			"https://1.0.0.1/dns-query",
+		},
+	}
+	config["outbounds"] = append(outbounds, map[string]string{
+		"tag": "26x-dns", "protocol": "dns",
+	})
+	routing["rules"] = append([]any{
+		map[string]any{"type": "field", "inboundTag": []string{"26x-doh"}, "outboundTag": "26x-proxy"},
+		map[string]any{
+			"type": "field", "inboundTag": []string{"26x-tun"},
+			"ip": settings["dns"], "port": "53", "network": "tcp,udp", "outboundTag": "26x-dns",
+		},
+	}, rules...)
 	config["log"] = map[string]string{"loglevel": "none"}
 	delete(config, "env")
 	result, err := json.Marshal(config)

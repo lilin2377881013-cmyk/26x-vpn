@@ -38,10 +38,20 @@ jobs:
       - name: Include Wintun license
         shell: bash
         run: cp wintun/LICENSE.txt client/build/windows/x64/runner/Release/
+      - name: Package Windows installer
+        working-directory: client/windows
+        shell: pwsh
+        run: |
+          $nsis = Join-Path ${env:ProgramFiles(x86)} 'NSIS\makensis.exe'
+          if (-not (Test-Path $nsis)) {
+            choco install nsis --yes --no-progress
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+          & $nsis 26x-setup.nsi
       - uses: actions/upload-artifact@v4
         with:
           name: 26x-Windows-x64
-          path: client/build/windows/x64/runner/Release/
+          path: client/windows/26X-Setup-x64.exe
           if-no-files-found: error
   ios:
     if: github.event_name == 'workflow_dispatch' && inputs.build_ios

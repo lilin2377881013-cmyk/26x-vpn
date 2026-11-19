@@ -48,10 +48,17 @@ jobs:
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
           & $nsis 26x-setup.nsi
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Verify Windows installation and removal
+        shell: pwsh
+        run: client/scripts/test_windows_installer.ps1
       - uses: actions/upload-artifact@v4
         with:
           name: 26x-Windows-x64
-          path: client/windows/26X-Setup-x64.exe
+          path: |
+            client/windows/26x-VPN-0.1.7-Setup-x64.exe
+            client/windows/windows-package-report.json
+            client/windows/windows-icon-preview.png
           if-no-files-found: error
   ios:
     if: github.event_name == 'workflow_dispatch' && inputs.build_ios

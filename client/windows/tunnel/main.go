@@ -109,7 +109,8 @@ func configure(raw []byte, routes []string) (string, error) {
 		return "", errors.New("missing outbounds")
 	}
 	config["dns"] = map[string]any{
-		"tag": "26x-doh",
+		"tag":           "26x-doh",
+		"queryStrategy": "UseIPv4",
 		"servers": []string{
 			"https://1.1.1.1/dns-query",
 			"https://1.0.0.1/dns-query",
@@ -122,8 +123,9 @@ func configure(raw []byte, routes []string) (string, error) {
 		map[string]any{"type": "field", "inboundTag": []string{"26x-doh"}, "outboundTag": "26x-proxy"},
 		map[string]any{
 			"type": "field", "inboundTag": []string{"26x-tun"},
-			"ip": settings["dns"], "port": "53", "network": "tcp,udp", "outboundTag": "26x-dns",
+			"port": "53", "network": "tcp,udp", "outboundTag": "26x-dns",
 		},
+		map[string]any{"type": "field", "inboundTag": []string{"26x-tun"}, "ip": []string{"::/0"}, "outboundTag": "block"},
 	}, rules...)
 	config["log"] = map[string]string{"loglevel": "none"}
 	delete(config, "env")

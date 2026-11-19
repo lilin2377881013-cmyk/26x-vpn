@@ -51,12 +51,13 @@ class VpnTunnelService : VpnService() {
       }
 
       startInForeground()
+      val config = ipv4TunnelConfig(rawConfig)
       val ping = JSONObject()
         .put("apiVersion", 3)
         .put("method", "pingBatch")
         .put("payload", JSONObject()
           .put("configs", JSONArray().put(JSONObject()
-            .put("xrayJson", rawConfig)
+            .put("xrayJson", config.toString())
             .put("outboundTag", "26x-proxy")))
           .put("timeout", 8)
           .put("url", "https://cp.cloudflare.com/generate_204"))
@@ -78,6 +79,7 @@ class VpnTunnelService : VpnService() {
         .addAddress("fd26:26::1", 126)
         .addRoute("::", 0)
         .addDnsServer("1.1.1.1")
+        .addDnsServer("1.0.0.1")
       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
         builder.addRoute("0.0.0.0", 0)
         for (network in excluded) {
@@ -98,7 +100,6 @@ class VpnTunnelService : VpnService() {
       }
       LibXray.setDNS(dialerController, "1.1.1.1:53")
 
-      val config = JSONObject(rawConfig)
       // VpnService owns the routing table. The protected dialer handles
       // outbound sockets without binding to a stale physical interface name.
       val tun = config.getJSONArray("inbounds").getJSONObject(0).getJSONObject("settings")
@@ -124,6 +125,35 @@ class VpnTunnelService : VpnService() {
       TunnelRuntime.publish("error", "tunnel_start_failed")
       stopSelf(startId)
     }
+  }
+
+  private fun ipv4TunnelConfig(rawConfig: String): JSONObject {
+    val config = JSONObject(rawConfig)
+    config.put("dns", JSONObject()
+      .put("tag", "26x-doh")
+      .put("queryStrategy", "UseIPv4")
+      .put("servers", JSONArray()
+        .put("https://1.1.1.1/dns-query")
+        .put("https://1.0.0.1/dns-query")))
+    config.getJSONArray("outbounds").put(JSONObject()
+      .put("tag", "26x-dns").put("protocol", "dns"))
+    val routing = config.getJSONObject("routing")
+    val previous = routing.getJSONArray("rules")
+    val rules = JSONArray()
+      .put(JSONObject().put("type", "field")
+        .put("inboundTag", JSONArray().put("26x-doh"))
+        .put("outboundTag", "26x-proxy"))
+      .put(JSONObject().put("type", "field")
+        .put("inboundTag", JSONArray().put("26x-tun"))
+        .put("port", "53").put("network", "tcp,udp")
+        .put("outboundTag", "26x-dns"))
+      .put(JSONObject().put("type", "field")
+        .put("inboundTag", JSONArray().put("26x-tun"))
+        .put("ip", JSONArray().put("::/0"))
+        .put("outboundTag", "block"))
+    for (index in 0 until previous.length()) rules.put(previous.get(index))
+    routing.put("rules", rules)
+    return config
   }
 
   private fun disconnect(startId: Int) {
@@ -181,7 +211,7 @@ class VpnTunnelService : VpnService() {
       Notification.Builder(this)
     }
     val notification = builder
-      .setSmallIcon(android.R.drawable.stat_sys_warning)
+      .setSmallIcon(com.example.twentysixx_client.R.drawable.ic_vpn_status)
       .setContentTitle("26x VPN")
       .setContentText("正在保护网络连接")
       .setOngoing(true)

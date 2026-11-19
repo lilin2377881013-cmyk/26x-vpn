@@ -78,7 +78,14 @@ server {
         types {
             application/vnd.android.package-archive apk;
             application/zip zip;
+            application/vnd.microsoft.portable-executable exe;
+            application/octet-stream dmg;
         }
+        default_type application/octet-stream;
+        add_header Content-Disposition "attachment" always;
+        add_header Strict-Transport-Security "max-age=31536000" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header Referrer-Policy "no-referrer" always;
         autoindex off;
     }
 

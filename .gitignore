@@ -12,6 +12,7 @@
 **/.flutter-plugins
 **/.flutter-plugins-dependencies
 **/.gradle/
+**/.kotlin/
 **/.cxx/
 **/Pods/
 **/local.properties

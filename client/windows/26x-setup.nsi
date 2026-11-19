@@ -34,7 +34,9 @@ Function .onInit
 FunctionEnd
 
 Function un.onInit
-  StrCpy $INSTDIR "$EXEDIR"
+  # NSIS runs a temporary copy of the uninstaller. Keep deletion confined
+  # to the application's fixed install directory instead of that temp path.
+  StrCpy $INSTDIR "$PROGRAMFILES64\26x VPN"
 FunctionEnd
 
 Section "26x VPN"

@@ -368,24 +368,32 @@ export function DownloadSettings() {
 type PaymentOrder = {
   orderNo: string; providerOrderNo: string | null; email: string; plan: string;
   product: string; amountCents: number; createdAt: string; paidAt: string | null;
-  status: "created" | "unconfirmed" | "paid";
+  status: "created" | "unconfirmed" | "paid" | "selection" | "waiting" | "expired" | "review";
+  paymentChannel: "selection" | "alipay" | "usdt"; usdtAmount: string | null; usdtAddress: string | null; txHash: string | null;
 };
 
-const paymentStatuses = { created: "未取得通道单号", unconfirmed: "未确认到账", paid: "已到账" };
+const paymentStatuses = { created: "未取得通道单号", unconfirmed: "未确认到账", paid: "已到账", selection: "待选付款方式", waiting: "等待链上确认", expired: "已过期", review: "待核查" };
+const paymentChannels = { selection: "待选择", alipay: "支付宝", usdt: "USDT · TRC20" };
+type USDTTransfer = { txHash: string; logIndex: number; amountUnits: string; address: string; orderNo: string | null; email: string | null; result: string; reason: string; blockTime: string };
+const usdtUnitsLabel = (value: string) => { const digits = value.padStart(7, "0"); return `${digits.slice(0, -6)}.${digits.slice(-6)}`; };
 const yuan = new Intl.NumberFormat("zh-CN", { style: "currency", currency: "CNY" });
 
 export function PaymentOrders() {
+  const [recheckHash, setRecheckHash] = useState("");
+  const [recheckNote, setRecheckNote] = useState("");
+  const [rechecking, setRechecking] = useState(false);
   const [page, setPage] = useState(1);
   const [refresh, setRefresh] = useState(0);
   const { data, error } = useData<{ items: PaymentOrder[]; hasMore: boolean }>(`/orders?page=${page}&refresh=${refresh}`);
+  const { data: transfers } = useData<{items: USDTTransfer[]}>(`/usdt/transfers?refresh=${refresh}`);
   return <Page title="支付订单" action={<button onClick={() => setRefresh(refresh + 1)}>刷新</button>}>
     {error ? <ErrorMessage message={error} /> : !data ? <p>正在加载订单…</p> :
       data.items.length === 0 ? <p>暂无订单。</p> : <div className={styles.card} style={{ overflowX: "auto" }}>
         <table><thead><tr><th>订单号</th><th>用户</th><th>套餐</th><th>金额</th><th>渠道</th><th>状态</th><th>下单时间</th><th>到账时间</th></tr></thead>
           <tbody>{data.items.map((order) => <tr key={order.orderNo}>
             <td>{order.orderNo}{order.providerOrderNo && <small>通道单号 {order.providerOrderNo}</small>}</td>
-            <td>{order.email}</td><td>{order.plan}</td><td>{yuan.format(order.amountCents / 100)}</td>
-            <td>{order.product}</td><td>{paymentStatuses[order.status]}</td>
+            <td>{order.email}</td><td>{order.plan}</td><td>{yuan.format(order.amountCents / 100)}{order.usdtAmount && <small>{order.usdtAmount} USDT</small>}</td>
+            <td>{paymentChannels[order.paymentChannel] ?? order.product}{order.usdtAddress && <small>{order.usdtAddress}</small>}{order.txHash && <small>TXID {order.txHash}</small>}</td><td>{paymentStatuses[order.status]}</td>
             <td>{dateLabel(order.createdAt)}</td><td>{dateLabel(order.paidAt)}</td>
           </tr>)}</tbody>
         </table>
@@ -395,6 +403,21 @@ export function PaymentOrders() {
       <span>第 {page} 页</span>{" "}
       <button disabled={!data?.hasMore} onClick={() => setPage(page + 1)}>下一页</button>
     </div>
+    <h2>USDT 链上到账记录</h2>
+    <form onSubmit={async e => { e.preventDefault(); setRechecking(true); setRecheckNote(""); try { await write("/usdt/recheck", "POST", { txHash: recheckHash }); setRefresh(refresh + 1); setRecheckNote("链上补查完成，请核对下方记录；未确认或异常金额不会自动开通。"); } catch { setRecheckNote("暂时无法补查，请核实交易哈希，确认交易已上链后重试。"); } finally { setRechecking(false); } }}>
+      <label>交易哈希（TXID）<input value={recheckHash} onChange={e => setRecheckHash(e.target.value)} required pattern="[a-fA-F0-9]{64}" maxLength={64} placeholder="输入 64 位交易哈希" /></label>
+      <button disabled={rechecking}>{rechecking ? "正在核查…" : "从链上补查"}</button>
+      {recheckNote && <p role="status">{recheckNote}</p>}
+    </form>
+    <p>展示最近 200 条已确认转账。未匹配或超时付款需核查；不可仅凭付款截图补发会员。</p>
+    {transfers && <div className={styles.card} style={{overflowX: "auto"}}><table>
+      <thead><tr><th>交易哈希</th><th>实际到账 USDT</th><th>收款地址</th><th>订单 / 用户</th><th>处理结果</th><th>链上时间</th></tr></thead>
+      <tbody>{transfers.items.map(t => <tr key={`${t.txHash}:${t.logIndex}`}>
+        <td style={{maxWidth: 240, overflowWrap: "anywhere"}}>{t.txHash}<small>事件 #{t.logIndex}</small></td>
+        <td>{usdtUnitsLabel(t.amountUnits)}</td><td style={{maxWidth: 220, overflowWrap: "anywhere"}}>{t.address}</td>
+        <td>{t.orderNo ?? "未匹配"}<small>{t.email}</small></td><td>{t.result === "paid" ? "已开通会员" : "待人工核查"}</td><td>{dateLabel(t.blockTime)}</td>
+      </tr>)}</tbody></table></div>}
+
   </Page>;
 }
 

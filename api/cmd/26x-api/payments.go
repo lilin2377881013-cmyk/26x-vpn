@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -15,6 +16,10 @@ func (s *server) checkout(w http.ResponseWriter, r *http.Request) {
 	}
 	if decodeJSON(w, r, &input) != nil || input.PlanCode == "" || len(input.PlanCode) > 80 {
 		writeError(w, http.StatusBadRequest, "invalid_plan", "请选择套餐")
+		return
+	}
+	if s.cfg.usdt != nil && s.cfg.usdt.accepting {
+		s.checkoutSelection(w, r, input.PlanCode)
 		return
 	}
 	g := s.cfg.payment
@@ -170,20 +175,30 @@ func (s *server) paymentNotify(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) grantPayment(r *http.Request, orderNo, serial string) error {
-	ctx := r.Context()
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.db.BeginTx(r.Context(), nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
+	if err = s.grantOrderTx(r.Context(), tx, orderNo, serial, "alipay"); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *server) grantOrderTx(ctx context.Context, tx *sql.Tx, orderNo, serial, channel string) error {
+	var savedChannel string
 	var userID, planID string
 	var duration int
 	var existingSerial, subscription sql.NullString
-	err = tx.QueryRowContext(ctx, `SELECT user_id::text, plan_id::text, duration_days, provider_order_no, subscription_id::text
+	err := tx.QueryRowContext(ctx, `SELECT user_id::text, plan_id::text, duration_days, provider_order_no, subscription_id::text, payment_channel
 		FROM payment_orders WHERE order_no=$1 FOR UPDATE`, orderNo).
-		Scan(&userID, &planID, &duration, &existingSerial, &subscription)
+		Scan(&userID, &planID, &duration, &existingSerial, &subscription, &savedChannel)
 	if err != nil {
 		return err
+	}
+	if savedChannel != channel {
+		return errors.New("payment channel mismatch")
 	}
 	if existingSerial.Valid && existingSerial.String != serial {
 		return errors.New("payment provider order number changed")
@@ -210,5 +225,5 @@ func (s *server) grantPayment(r *http.Request, orderNo, serial string) error {
 		WHERE order_no=$1`, orderNo, serial, id); err != nil {
 		return err
 	}
-	return tx.Commit()
+	return nil
 }

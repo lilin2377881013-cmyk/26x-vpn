@@ -1,0 +1,17 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>26x · 会员支付</title>
+<style>body{margin:0;background:#171c27;color:#eef1f7;font:16px/1.65 system-ui,-apple-system,sans-serif}main{max-width:620px;margin:40px auto;padding:28px;background:#232b3a;border-radius:24px;box-sizing:border-box}h1{color:#f3cf86}button,a.button{display:block;width:100%;box-sizing:border-box;padding:16px;margin:16px 0;border:0;border-radius:14px;background:#edca85;color:#211b11;font-size:18px;font-weight:600;text-align:center;text-decoration:none;cursor:pointer}.amount{font-size:38px;color:#f3cf86;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}.address{overflow-wrap:anywhere;user-select:all;font:16px/1.8 monospace;background:#171c27;padding:14px;border-radius:12px}.note{color:#cbd1dc;font-size:14px}.warn{background:#413727;padding:16px;border-radius:12px}img{display:block;margin:20px auto;max-width:100%}small{overflow-wrap:anywhere;color:#b8c1d0}@media(max-width:680px){main{margin:14px;padding:22px}.amount{font-size:32px}}</style>
+<main>{{if .Testing}}<p class="warn"><strong>隔离测试收银台</strong><br>此订单只验证收款链路，不在正式系统购买或开通会员。请确认测试金额后付款。</p>{{end}}<h1>26x 会员支付</h1><h2>{{.Plan}}</h2><p>套餐价格：¥{{.Yuan}}</p><small>订单号：{{.Order}}</small>
+{{if .Paid}}<h2>支付成功</h2><p>会员已开通。请返回 26x 刷新会员状态。</p>
+{{else if eq .Channel "usdt"}}<h2>USDT · TRC20</h2>
+{{if .Expired}}<p class="warn">订单已过期，请勿继续付款。若你已转账，请联系客服并提供订单号及交易哈希，我们会核查到账记录。</p>
+{{else}}<p>请转账完整金额：</p><div class="amount">{{.Amount}} USDT</div><p class="warn">小数点后 6 位 <strong>{{.Code}}</strong> 是本笔付款识别码。请完整填写金额，不要取整，不要拆分付款。请确保实际到账金额完整，提现手续费由付款方承担。</p>
+<img src="{{.Root}}{{.Token}}/qr" width="256" height="256" alt="USDT-TRC20 收款地址二维码">
+<p class="note">二维码仅包含收款地址，金额请按上面的完整数字填写。</p>{{end}}
+<p>收款地址（仅限 TRON / TRC20 网络）：</p><div class="address">{{.Address}}</div><p class="note">请勿发送其他网络或其他币种。USDT 转账需等待链上确认后才会开通。</p><p class="note">有效期至：{{.Expires}}</p><a class="button" href="{{.Root}}{{.Token}}">查询到账结果</a>
+{{else if .Expired}}<p>订单已过期，请返回 26x 重新选择套餐。</p>
+{{else if eq .Channel "alipay"}}<p>此订单已选择支付宝支付。</p><form method="post" action="{{.Root}}{{.Token}}/alipay"><button>继续支付宝支付</button></form>
+{{else}}<p>请选择付款方式：</p>
+{{if .Alipay}}<form method="post" action="{{.Root}}{{.Token}}/alipay"><button>支付宝支付</button></form>{{end}}
+{{if .USDT}}<form method="post" action="{{.Root}}{{.Token}}/usdt"><button>USDT · TRC20 支付</button></form><p class="note">USDT 套餐价：{{.Quote}} USDT；下单时会增加不超过 0.010000 USDT 的付款识别尾数，最终金额以付款页为准。</p>{{end}}
+<p class="note">选择一种付款方式后，请在该订单内完成付款，勿重复支付。</p>{{end}}
+</main></html>

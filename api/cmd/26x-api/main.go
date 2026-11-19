@@ -35,6 +35,7 @@ type config struct {
 	managedVLESS   *managedVLESS
 	nodeCommand    string
 	payment        *paymentGateway
+	usdt           *usdtGateway
 }
 
 func main() {
@@ -90,6 +91,9 @@ func main() {
 	signalCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	go app.notifySupport(signalCtx)
+	if cfg.usdt != nil {
+		go app.watchUSDT(signalCtx)
+	}
 	if cfg.managedVLESS != nil {
 		go app.syncManagedCredentials(signalCtx)
 	}
@@ -126,6 +130,10 @@ func loadConfig() (config, error) {
 	}
 	var err error
 	cfg.payment, err = loadPaymentGateway()
+	if err != nil {
+		return cfg, err
+	}
+	cfg.usdt, err = loadUSDTGateway()
 	if err != nil {
 		return cfg, err
 	}

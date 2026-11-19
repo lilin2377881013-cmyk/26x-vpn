@@ -23,6 +23,7 @@ import (
 const paymentNotifyPath = "/api/v1/payments/juliang/notify"
 
 type paymentGateway struct {
+	maintenance                                     bool
 	apiOrigin, merchant, secret, product, notifyURL string
 	cashierOrigin                                   string
 	client                                          *http.Client
@@ -42,6 +43,11 @@ func loadPaymentGateway() (*paymentGateway, error) {
 		client:    &http.Client{Timeout: 8 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }},
 	}
 	g.cashierOrigin = os.Getenv("JULIANG_CASHIER_ORIGIN")
+	var err error
+	g.maintenance, err = strconv.ParseBool(env("ALIPAY_MAINTENANCE", "false"))
+	if err != nil {
+		return nil, errors.New("invalid ALIPAY_MAINTENANCE")
+	}
 	notify, err := url.Parse(g.notifyURL)
 	if err != nil || !validPaymentURL(g.notifyURL) || notify.Path != paymentNotifyPath ||
 		g.merchant == "" || g.secret == "" || g.product == "P0000" {

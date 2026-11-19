@@ -9,8 +9,9 @@
 <p class="note">二维码仅包含收款地址，金额请按上面的完整数字填写。</p>{{end}}
 <p>收款地址（仅限 TRON / TRC20 网络）：</p><div class="address">{{.Address}}</div><p class="note">请勿发送其他网络或其他币种。USDT 转账需等待链上确认后才会开通。</p><p class="note">有效期至：{{.Expires}}</p><a class="button" href="{{.Root}}{{.Token}}">查询到账结果</a>
 {{else if .Expired}}<p>订单已过期，请返回 26x 重新选择套餐。</p>
-{{else if eq .Channel "alipay"}}<p>此订单已选择支付宝支付。</p><form method="post" action="{{.Root}}{{.Token}}/alipay"><button>继续支付宝支付</button></form>
+{{else if eq .Channel "alipay"}}{{if .AlipayMaintenance}}<p class="warn">支付宝维护中，请稍后重试。也可以返回 26x 创建新订单，选择 USDT 支付。</p>{{else}}<p>此订单已选择支付宝支付。</p><form method="post" action="{{.Root}}{{.Token}}/alipay"><button>继续支付宝支付</button></form>{{end}}
 {{else}}<p>请选择付款方式：</p>
+{{if .AlipayMaintenance}}<p class="warn">支付宝维护中，暂不可用。你可以选择 USDT 支付。</p>{{end}}
 {{if .Alipay}}<form method="post" action="{{.Root}}{{.Token}}/alipay"><button>支付宝支付</button></form>{{end}}
 {{if .USDT}}<form method="post" action="{{.Root}}{{.Token}}/usdt"><button>USDT · TRC20 支付</button></form><p class="note">USDT 套餐价：{{.Quote}} USDT；下单时会增加不超过 0.010000 USDT 的付款识别尾数，最终金额以付款页为准。</p>{{end}}
 <p class="note">选择一种付款方式后，请在该订单内完成付款，勿重复支付。</p>{{end}}

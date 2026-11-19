@@ -23,6 +23,10 @@ func (s *server) checkout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	g := s.cfg.payment
+	if g != nil && g.maintenance {
+		writeError(w, http.StatusServiceUnavailable, "payment_maintenance", "支付宝维护中，请稍后重试")
+		return
+	}
 	if g == nil {
 		writeError(w, http.StatusServiceUnavailable, "payment_unavailable", "支付暂未开放")
 		return

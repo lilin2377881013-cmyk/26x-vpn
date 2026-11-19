@@ -347,6 +347,25 @@ func TestUSDTCheckoutMonitorAndReplay(t *testing.T) {
 		t.Fatal("failure advanced scan watermark")
 	}
 	apiFail.Store(false)
+	// Provider maintenance must not create a payable Alipay order or block USDT.
+	maintenanceOrder := makeOrder(user("payer-maintenance"))
+	gateway.maintenance = true
+	maintenancePage := httptest.NewRecorder()
+	maintenanceRequest := httptest.NewRequest("GET", cashierPath+maintenanceOrder.token, nil)
+	s.routes().ServeHTTP(maintenancePage, maintenanceRequest)
+	if !strings.Contains(maintenancePage.Body.String(), "支付宝维护中") || strings.Contains(maintenancePage.Body.String(), `/alipay"><button>`) {
+		t.Fatal("maintenance page offered unavailable Alipay")
+	}
+	if w := choose(maintenanceOrder, "alipay"); w.Code != 503 || alipayCalls.Load() != 0 {
+		t.Fatal("maintenance contacted provider", w.Code)
+	}
+	if err := s.pollUSDT(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if w := choose(maintenanceOrder, "usdt"); w.Code != 303 {
+		t.Fatal("maintenance prevented USDT selection", w.Code)
+	}
+	gateway.maintenance = false
 	c := makeOrder(user("payer-alipay"))
 	if w := choose(c, "alipay"); w.Code != 303 || w.Header().Get("Location") != "https://cashier.test/alipay" {
 		t.Fatalf("alipay broken: %d %s", w.Code, w.Body.String())

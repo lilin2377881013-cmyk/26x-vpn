@@ -117,7 +117,7 @@ func (s *server) cashierPage(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	data := map[string]any{"Testing": s.cfg.usdt != nil && s.cfg.usdt.testMode, "Order": o.number, "Plan": o.planName, "Yuan": fmt.Sprintf("%d.%02d", o.cents/100, o.cents%100), "Token": r.PathValue("token"), "Root": cashierPath, "Paid": o.paid.Valid, "Expired": time.Now().After(o.expires), "Channel": o.channel, "Alipay": s.cfg.payment != nil, "USDT": false}
+	data := map[string]any{"Testing": s.cfg.usdt != nil && s.cfg.usdt.testMode, "Order": o.number, "Plan": o.planName, "Yuan": fmt.Sprintf("%d.%02d", o.cents/100, o.cents%100), "Token": r.PathValue("token"), "Root": cashierPath, "Paid": o.paid.Valid, "Expired": time.Now().After(o.expires), "Channel": o.channel, "Alipay": s.cfg.payment != nil && !s.cfg.payment.maintenance, "AlipayMaintenance": s.cfg.payment != nil && s.cfg.payment.maintenance, "USDT": false}
 	if g := s.cfg.usdt; g != nil && g.accepting {
 		if quote, e := g.quote(o.planCode, o.cents); e == nil {
 			data["USDT"] = true
@@ -202,6 +202,10 @@ func (s *server) selectCashier(w http.ResponseWriter, r *http.Request) {
 		}
 	} else {
 		pg := s.cfg.payment
+		if pg != nil && pg.maintenance {
+			http.Error(w, "支付宝维护中，请选择 USDT 或稍后重试", 503)
+			return
+		}
 		if pg == nil {
 			http.Error(w, "Alipay unavailable", 503)
 			return

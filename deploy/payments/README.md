@@ -11,7 +11,7 @@ Copy `usdt.env.example` into a private server environment file (mode 600). Ensur
 `USDT_PUBLIC_ORIGIN`. Provide
 a checksum-valid TRON mainnet receiving address, your own TronGrid chain-data API
 key, and explicit fixed USDT plan prices. No wallet private key or mnemonic is
-used anywhere in this service. The example prices are the selected release prices; the new checkout remains disabled until both payment channels pass production acceptance.
+used anywhere in this service. The example prices are the selected release prices; USDT is enabled with merchant authorization while Alipay is in maintenance.
 The official USDT contract is pinned in code; arbitrary tokens cannot be enabled.
 
 Fixed prices and conversion calculations use exact integer/rational arithmetic.
@@ -103,10 +103,12 @@ records for settlement and reconciliation.
 ## Deployment status (2026-11-20, Asia/Shanghai)
 
 The API, migration 020, observer and admin UI are installed. The dedicated chain
-key was verified and remains only in the private server environment. New checkout
-is disabled because the existing Alipay provider returns business code 603,
-channel 99982 closed. Restore that provider channel, repeat Alipay initialization
-and redirect acceptance, then enable the selector. See `docs/usdt-test-report.md`.
+key was verified and remains only in the private server environment. The merchant confirmed that Alipay is under maintenance and authorized enabling
+USDT independently. `USDT_ACCEPT_PAYMENTS=true` opens the selector;
+`ALIPAY_MAINTENANCE=true` displays a maintenance notice and prevents new Alipay
+requests while retaining its callbacks and USDT payment processing. After the
+provider restores channel 99982, repeat Alipay initialization and redirect
+acceptance before setting `ALIPAY_MAINTENANCE=false`. See `docs/usdt-test-report.md`.
 
 When deploying the Next.js standalone directory, create `.next/cache` and assign
 it to the service account before restarting: the existing hardened systemd unit

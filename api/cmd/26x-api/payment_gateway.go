@@ -134,6 +134,8 @@ func (g *paymentGateway) request(ctx context.Context, method, path, order string
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
+	req.Header.Set("User-Agent", "26x-Payments/1.0 (+https://26xvpn.com)")
+	req.Header.Set("Accept", "application/json")
 	resp, err := g.client.Do(req)
 	if err != nil {
 		return result, errors.New("payment gateway unavailable")

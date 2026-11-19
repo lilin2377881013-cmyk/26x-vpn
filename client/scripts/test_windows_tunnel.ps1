@@ -25,9 +25,16 @@ try {
     $diagnostics = $worker.StandardError.ReadToEndAsync()
     $worker.StandardInput.WriteLine(($config | ConvertTo-Json -Depth 12 -Compress))
     $worker.StandardInput.Flush()
-    $ready = $worker.StandardOutput.ReadLineAsync()
-    if (-not $ready.Wait(35000)) { throw 'Windows TUN startup timed out' }
-    if ($ready.Result -ne 'connected') { throw "Windows TUN failed: $($ready.Result)" }
+    $deadline = [DateTime]::UtcNow.AddSeconds(35)
+    while ($true) {
+        $remaining = [int]($deadline - [DateTime]::UtcNow).TotalMilliseconds
+        $ready = $worker.StandardOutput.ReadLineAsync()
+        if ($remaining -le 0 -or -not $ready.Wait($remaining)) { throw 'Windows TUN startup timed out' }
+        $line = $ready.Result
+        if ($line -eq 'connected') { break }
+        if ($null -eq $line -or $line -in @('vpn_permission_denied', 'engine_unavailable', 'profile_invalid', 'node_unreachable', 'tunnel_start_failed')) { throw "Windows TUN failed: $line" }
+        Write-Host "Worker startup: $line"
+    }
     $tailOutput = $worker.StandardOutput.ReadToEndAsync()
     Write-Host 'Installed Windows worker connected.'
     function Query-TunnelDns([byte]$Type) {

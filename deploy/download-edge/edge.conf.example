@@ -1,0 +1,39 @@
+# Install on the download mirror after issuing its IP certificate.
+server {
+    listen 80;
+    server_name 94.103.6.235;
+    server_tokens off;
+    location ^~ /.well-known/acme-challenge/ { root /var/www/26x-acme; }
+    location / { return 404; }
+}
+
+server {
+    listen 443 ssl;
+    server_name 94.103.6.235;
+    ssl_certificate /etc/letsencrypt/live/26x-download-edge/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/26x-download-edge/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    server_tokens off;
+    sendfile on;
+    tcp_nopush on;
+    gzip off;
+    access_log /var/log/nginx/26x-downloads.access.log combined;
+
+    location = /healthz { access_log off; return 204; }
+    location ^~ /downloads/ {
+        alias /var/www/26x-downloads/;
+        types {
+            application/vnd.android.package-archive apk;
+            application/vnd.microsoft.portable-executable exe;
+            application/octet-stream dmg;
+            application/zip zip;
+        }
+        default_type application/octet-stream;
+        add_header Content-Disposition "attachment" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header Referrer-Policy "no-referrer" always;
+        add_header Cache-Control "public, max-age=3600";
+        autoindex off;
+    }
+    location / { return 404; }
+}

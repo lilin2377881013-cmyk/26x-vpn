@@ -1,0 +1,11 @@
+[Unit]
+Description=Synchronize 26x published download packages to the Hong Kong mirror
+After=network-online.target nginx.service postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /opt/26x-download-edge/sync.py
+TimeoutStartSec=600
+Nice=10
+UMask=0022

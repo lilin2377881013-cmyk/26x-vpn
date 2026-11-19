@@ -1,0 +1,9 @@
+[Unit]
+Description=Renew the 26x download mirror IP certificate
+After=network-online.target nginx.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/26x-download-certbot/bin/certbot renew --quiet --no-random-sleep-on-renew --deploy-hook "/usr/sbin/nginx -t && /usr/bin/systemctl reload nginx"
+TimeoutStartSec=300

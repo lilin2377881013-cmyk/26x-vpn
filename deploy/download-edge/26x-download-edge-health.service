@@ -1,0 +1,11 @@
+[Unit]
+Description=Check HTTPS download mirror and fall back to origin if unhealthy
+After=network-online.target nginx.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /opt/26x-download-edge/sync.py --health-only
+TimeoutStartSec=60
+Nice=10
+UMask=0022

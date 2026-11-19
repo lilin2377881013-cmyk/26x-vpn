@@ -18,13 +18,18 @@ $start.RedirectStandardError = $true
 $worker = [Diagnostics.Process]::new()
 $worker.StartInfo = $start
 $started = $false
+$diagnostics = $null
+$tailOutput = $null
 try {
     $started = $worker.Start()
+    $diagnostics = $worker.StandardError.ReadToEndAsync()
     $worker.StandardInput.WriteLine(($config | ConvertTo-Json -Depth 12 -Compress))
     $worker.StandardInput.Flush()
     $ready = $worker.StandardOutput.ReadLineAsync()
     if (-not $ready.Wait(35000)) { throw 'Windows TUN startup timed out' }
     if ($ready.Result -ne 'connected') { throw "Windows TUN failed: $($ready.Result)" }
+    $tailOutput = $worker.StandardOutput.ReadToEndAsync()
+    Write-Host 'Installed Windows worker connected.'
     function Query-TunnelDns([byte]$Type) {
         [byte[]]$query = @(0x26, $Type, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 3, 119, 119, 119, 6, 103, 111, 111, 103, 108, 101, 3, 99, 111, 109, 0, 0, $Type, 0, 1)
         $udp = [Net.Sockets.UdpClient]::new()
@@ -38,13 +43,24 @@ try {
             return ([int]$answer[6] * 256 + [int]$answer[7])
         } finally { $udp.Dispose() }
     }
-    if ((Query-TunnelDns 1) -lt 1) { throw 'Windows TUN IPv4 DNS returned no addresses' }
-    if ((Query-TunnelDns 28) -ne 0) { throw 'Windows TUN returned unsupported IPv6 addresses' }
+    $a = Query-TunnelDns 1
+    $aaaa = Query-TunnelDns 28
+    Write-Host "Windows DNS answers: A=$a AAAA=$aaaa"
+    if ($a -lt 1) { throw 'Windows TUN IPv4 DNS returned no addresses' }
+    if ($aaaa -ne 0) { throw 'Windows TUN returned unsupported IPv6 addresses' }
     if ((Invoke-WebRequest 'https://cp.cloudflare.com/generate_204' -TimeoutSec 15).StatusCode -ne 204) { throw 'Windows TUN HTTPS probe failed' }
+} catch {
+    Write-Host "Windows tunnel verification error: $_"
+    throw
 } finally {
     if ($started) {
         $worker.StandardInput.Close()
-        if (-not $worker.WaitForExit(15000)) { $worker.Kill(); $worker.WaitForExit(); throw 'Windows TUN did not shut down cleanly' }
+        if (-not $worker.WaitForExit(15000)) {
+            $worker.Kill(); $worker.WaitForExit()
+            if ($diagnostics) { Write-Host $diagnostics.GetAwaiter().GetResult() }
+            throw 'Windows TUN did not shut down cleanly'
+        }
+        if ($diagnostics) { Write-Host $diagnostics.GetAwaiter().GetResult() }
     }
     $worker.Dispose()
 }

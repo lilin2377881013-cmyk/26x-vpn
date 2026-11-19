@@ -82,7 +82,27 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
     let address = try resolveAddress(host)
     settings["address"] = address
     outbounds[index]["settings"] = settings
+    // Resolve through the proxy over IPv4 HTTPS. IPv4-only nodes must not
+    // advertise AAAA answers that the browser cannot reach through the tunnel.
+    config["dns"] = [
+      "tag": "26x-doh",
+      "queryStrategy": "UseIPv4",
+      "servers": ["https://1.1.1.1/dns-query", "https://1.0.0.1/dns-query"],
+    ]
+    outbounds.append(["tag": "26x-dns", "protocol": "dns"])
     config["outbounds"] = outbounds
+    guard var routing = config["routing"] as? [String: Any],
+          let rules = routing["rules"] as? [[String: Any]] else {
+      throw tunnelError(1001, "VPN 路由配置格式无效。")
+    }
+    routing["rules"] = [
+      ["type": "field", "inboundTag": ["26x-doh"], "outboundTag": "26x-proxy"],
+      ["type": "field", "inboundTag": ["26x-tun"], "port": "53",
+       "network": "tcp,udp", "outboundTag": "26x-dns"],
+      ["type": "field", "inboundTag": ["26x-tun"], "ip": ["::/0"],
+       "outboundTag": "block"],
+    ] + rules
+    config["routing"] = routing
     config["log"] = ["loglevel": "none"]
     config.removeValue(forKey: "env")
     return (config, address)
@@ -122,7 +142,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
     ipv4.excludedRoutes = directRoutes
     network.ipv4Settings = ipv4
     network.ipv6Settings = ipv6
-    let dns = NEDNSSettings(servers: [TunnelDNSProbe.resolverAddress, "2606:4700:4700::1111"])
+    let dns = NEDNSSettings(servers: [TunnelDNSProbe.resolverAddress, "1.0.0.1"])
     dns.matchDomains = [""]
     network.dnsSettings = dns
     network.mtu = 1500

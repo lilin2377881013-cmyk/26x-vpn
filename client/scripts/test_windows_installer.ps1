@@ -22,8 +22,9 @@ try {
     $test = Start-Process -FilePath (Join-Path $directory '26x-tunnel.exe') -PassThru -Wait -NoNewWindow -RedirectStandardInput (Join-Path $PSScriptRoot 'invalid-profile.json') -RedirectStandardOutput (Join-Path $env:RUNNER_TEMP '26x-worker-result.txt')
     $reply = (Get-Content (Join-Path $env:RUNNER_TEMP '26x-worker-result.txt') -Raw).Trim()
     if ($test.ExitCode -ne 1 -or $reply -ne 'profile_invalid') { throw "Unexpected worker response: $reply" }
+    & (Join-Path $PSScriptRoot 'test_windows_tunnel.ps1') -Directory $directory
     $signature = Get-AuthenticodeSignature $installer
-    $report = [ordered]@{ version = '0.1.7'; build = 23; installation = 'passed'; runtimeAssets = 'passed'; workerInputValidation = 'passed'; authenticodeStatus = $signature.Status.ToString(); sha256 = (Get-FileHash $installer -Algorithm SHA256).Hash.ToLower() }
+    $report = [ordered]@{ version = '0.1.7'; build = 23; installation = 'passed'; runtimeAssets = 'passed'; workerInputValidation = 'passed'; nativeTunnelDnsAndRouteCleanup = 'passed'; authenticodeStatus = $signature.Status.ToString(); sha256 = (Get-FileHash $installer -Algorithm SHA256).Hash.ToLower() }
 } finally {
     $uninstaller = Join-Path $directory 'Uninstall.exe'
     if (Test-Path $uninstaller) {

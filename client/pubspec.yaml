@@ -1,7 +1,7 @@
 name: twentysixx_client
 description: 26x VPN client for iOS, macOS, Windows, and Android.
 publish_to: none
-version: 0.1.7+23
+version: 0.1.8+24
 
 environment:
   sdk: '>=3.10.0 <4.0.0'
@@ -15,6 +15,8 @@ dependencies:
   url_launcher: ^6.3.0
 
 dev_dependencies:
+  flutter_test:
+    sdk: flutter
   flutter_lints: ^6.0.0
 
 flutter:

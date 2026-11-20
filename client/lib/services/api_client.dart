@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import '../models.dart';
+import 'connection_errors.dart';
 
 class ApiException implements Exception {
   const ApiException(this.message, {this.statusCode});
@@ -33,20 +34,27 @@ class ConnectionLease {
 }
 
 class ApiClient {
-  ApiClient({String? baseUrl, bool trialSession = false})
-    : _trialSession = trialSession,
-      _baseUri = Uri.parse(
-        baseUrl ??
-            const String.fromEnvironment(
-              'API_BASE_URL',
-              defaultValue: 'http://127.0.0.1:8080',
-            ),
-      );
+  ApiClient({
+    String? baseUrl,
+    bool trialSession = false,
+    this.requestTimeout = const Duration(seconds: 20),
+  }) : _trialSession = trialSession,
+       _baseUri = Uri.parse(
+         baseUrl ??
+             const String.fromEnvironment(
+               'API_BASE_URL',
+               defaultValue: 'http://127.0.0.1:8080',
+             ),
+       );
 
+  final Duration requestTimeout;
   final Uri _baseUri;
   final bool _trialSession;
-  ApiClient createTrialClient() =>
-      ApiClient(baseUrl: _baseUri.origin, trialSession: true);
+  ApiClient createTrialClient() => ApiClient(
+    baseUrl: _baseUri.origin,
+    trialSession: true,
+    requestTimeout: requestTimeout,
+  );
   final HttpClient _http = HttpClient()
     ..connectionTimeout = const Duration(seconds: 12);
   String get _deviceIdKey => _storageKey(
@@ -133,7 +141,7 @@ class ApiClient {
         'platform': platform,
         'identifyOnly': true,
       },
-    ).timeout(const Duration(seconds: 15));
+    );
     if (result.statusCode != HttpStatus.ok) {
       throw ApiException(_errorMessage(result.body, '无法读取试用识别码'));
     }
@@ -274,10 +282,7 @@ class ApiClient {
   }
 
   Future<List<VpnPlan>> availablePlans() async {
-    final result = await _request(
-      'GET',
-      '/api/v1/plans',
-    ).timeout(const Duration(seconds: 15));
+    final result = await _request('GET', '/api/v1/plans');
     if (result.statusCode != HttpStatus.ok) {
       throw ApiException(
         _errorMessage(result.body, '无法读取套餐列表'),
@@ -531,10 +536,14 @@ class ApiClient {
     }
     try {
       return await _sendRequest(method, uri, csrf: csrf, body: body);
-    } on SocketException {
+    } on HandshakeException {
       throw ApiException(
-        uri.isScheme('http') ? '无法连接本机测试服务，请确认服务已启动。' : '无法连接 26x 服务，请检查网络后重试。',
+        '${apiRequestStage(method, uri.path)}安全连接校验失败，请检查系统时间或联系支持。',
       );
+    } on HttpException {
+      throw ApiException('${apiRequestStage(method, uri.path)}连接中断，请重试。');
+    } on SocketException {
+      throw ApiException('${apiRequestStage(method, uri.path)}无法连接，请检查网络后重试。');
     }
   }
 
@@ -544,29 +553,48 @@ class ApiClient {
     required bool csrf,
     required Object? body,
   }) async {
-    final request = await _http.openUrl(method, uri);
-    request.headers.set(HttpHeaders.acceptHeader, 'application/json');
-    request.headers.set(HttpHeaders.userAgentHeader, '26x/0.1.0');
-    if (_cookies.isNotEmpty) {
-      request.headers.set(
-        HttpHeaders.cookieHeader,
-        _cookies.entries.map((e) => '${e.key}=${e.value}').join('; '),
-      );
+    HttpClientRequest? activeRequest;
+    var timedOut = false;
+    Future<_Response> send() async {
+      final request = await _http.openUrl(method, uri);
+      activeRequest = request;
+      if (timedOut) {
+        request.abort();
+        throw const ApiException('请求已取消');
+      }
+      request.headers.set(HttpHeaders.acceptHeader, 'application/json');
+      request.headers.set(HttpHeaders.userAgentHeader, '26x/0.1.0');
+      if (_cookies.isNotEmpty) {
+        request.headers.set(
+          HttpHeaders.cookieHeader,
+          _cookies.entries.map((e) => '${e.key}=${e.value}').join('; '),
+        );
+      }
+      if (csrf && _csrfToken != null) {
+        request.headers.set('X-CSRF-Token', _csrfToken!);
+      }
+      if (body != null) {
+        request.headers.contentType = ContentType.json;
+        request.write(jsonEncode(body));
+      }
+      final response = await request.close();
+      final responseBody = await utf8.decoder.bind(response).join();
+      if (timedOut) throw const ApiException('请求已取消');
+      final cookies = response.cookies
+          .map((cookie) => '${cookie.name}=${cookie.value}')
+          .toList();
+      _captureCookies(cookies);
+      return _Response(response.statusCode, responseBody, cookies);
     }
-    if (csrf && _csrfToken != null) {
-      request.headers.set('X-CSRF-Token', _csrfToken!);
-    }
-    if (body != null) {
-      request.headers.contentType = ContentType.json;
-      request.write(jsonEncode(body));
-    }
-    final response = await request.close();
-    final responseBody = await utf8.decoder.bind(response).join();
-    final cookies = response.cookies
-        .map((cookie) => '${cookie.name}=${cookie.value}')
-        .toList();
-    _captureCookies(cookies);
-    return _Response(response.statusCode, responseBody, cookies);
+
+    return send().timeout(
+      requestTimeout,
+      onTimeout: () {
+        timedOut = true;
+        activeRequest?.abort();
+        throw ApiException('${apiRequestStage(method, uri.path)}请求超时，请重试。');
+      },
+    );
   }
 
   void _captureCookies(List<String> setCookies) {

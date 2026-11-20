@@ -48,7 +48,9 @@ class WindowsTunnel {
               'vpn_permission_denied',
               'engine_unavailable',
               'profile_invalid',
-          'node_unreachable',
+              'node_unreachable',
+              'probe_execution_failed',
+              'tunnel_core_failed',
               'tunnel_start_failed',
             }.contains(line)) {
               complete({'code': line});

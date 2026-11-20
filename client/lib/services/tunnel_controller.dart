@@ -4,6 +4,7 @@ import 'dart:io' show Platform;
 import 'package:flutter/services.dart';
 
 import '../models.dart';
+import 'connection_errors.dart';
 import 'windows_tunnel.dart';
 import 'xray_config_builder.dart';
 
@@ -51,7 +52,9 @@ class TunnelController {
           );
         },
       );
-      final status = await _commands.invokeMapMethod<String, dynamic>('status');
+      final status = await _commands
+          .invokeMapMethod<String, dynamic>('status')
+          .timeout(const Duration(seconds: 15));
       if (status == null) {
         _emit(
           const TunnelSnapshot(
@@ -69,8 +72,20 @@ class TunnelController {
           message: '当前平台的 VPN 接入模块尚未安装',
         ),
       );
+    } on TimeoutException {
+      _emit(
+        const TunnelSnapshot(
+          TunnelState.error,
+          message: '状态读取 [VPN-STATUS-TIMEOUT]：系统未返回 VPN 状态，请重试。',
+        ),
+      );
     } on PlatformException {
-      _emit(const TunnelSnapshot(TunnelState.error, message: '无法读取系统 VPN 状态'));
+      _emit(
+        const TunnelSnapshot(
+          TunnelState.error,
+          message: '状态读取 [VPN-STATUS]：无法读取系统 VPN 状态',
+        ),
+      );
     }
   }
 
@@ -88,12 +103,14 @@ class TunnelController {
     _emit(const TunnelSnapshot(TunnelState.connecting));
     try {
       final xrayJson = XrayConfigBuilder.build(profile);
-      final response = Platform.isWindows
-          ? await _windows.connect(xrayJson)
-          : await _commands.invokeMapMethod<String, dynamic>('connect', {
-              'nodeId': node.id,
-              'xrayJson': xrayJson,
-            });
+      final response =
+          await (Platform.isWindows
+                  ? _windows.connect(xrayJson)
+                  : _commands.invokeMapMethod<String, dynamic>('connect', {
+                      'nodeId': node.id,
+                      'xrayJson': xrayJson,
+                    }))
+              .timeout(const Duration(seconds: 60));
       if (response?['state'] == 'connected') {
         _emit(const TunnelSnapshot(TunnelState.connected));
       } else {
@@ -118,6 +135,14 @@ class TunnelController {
           message: _safeEngineMessage(error.code),
         ),
       );
+    } on TimeoutException {
+      await disconnect();
+      _emit(
+        TunnelSnapshot(
+          TunnelState.error,
+          message: _safeEngineMessage('tunnel_start_timeout'),
+        ),
+      );
     } on FormatException {
       _emit(
         const TunnelSnapshot(
@@ -133,10 +158,28 @@ class TunnelController {
   Future<void> disconnect() async {
     _emit(const TunnelSnapshot(TunnelState.disconnecting));
     try {
-      final response = Platform.isWindows
-          ? await _windows.disconnect()
-          : await _commands.invokeMapMethod<String, dynamic>('disconnect');
-      if (response != null) _readNativeState(response);
+      final response =
+          await (Platform.isWindows
+                  ? _windows.disconnect()
+                  : _commands.invokeMapMethod<String, dynamic>('disconnect'))
+              .timeout(const Duration(seconds: 20));
+      if (response != null) {
+        _readNativeState(response);
+      } else {
+        _emit(
+          TunnelSnapshot(
+            TunnelState.error,
+            message: _safeEngineMessage('tunnel_stop_failed'),
+          ),
+        );
+      }
+    } on TimeoutException {
+      _emit(
+        TunnelSnapshot(
+          TunnelState.error,
+          message: _safeEngineMessage('tunnel_stop_timeout'),
+        ),
+      );
     } on MissingPluginException {
       _emit(
         const TunnelSnapshot(
@@ -154,26 +197,16 @@ class TunnelController {
     }
   }
 
-  String _safeEngineMessage(String code) => switch (code) {
-    'vpn_permission_denied' =>
-      Platform.isWindows ? '请以管理员身份运行 26x VPN。' : '你拒绝了系统 VPN 权限。',
-    'profile_invalid' => '节点连接配置无效，请联系 26x 支持。',
-    'engine_unavailable' => '本版本的 VPN 核心尚未安装。',
-    'extension_activation_failed' => 'macOS 未能启用 26x VPN 系统扩展。',
-    'extension_restart_required' => '请重启 Mac，再连接 26x VPN。',
-    'tunnel_busy' => '请等当前 VPN 操作完成后重试。',
-    'node_unreachable' => '节点未能转发 HTTPS 请求，请稍后重试。',
-    'tunnel_routes_failed' => '系统未能配置 VPN 路由。',
-    'tunnel_core_failed' => 'VPN 核心启动失败。',
-    'tunnel_start_failed' => '系统未能启动 VPN 隧道，请稍后重试。',
-    'tunnel_stop_failed' => '系统未能正常断开 VPN。',
-    _ => 'VPN 隧道操作失败，请稍后重试。',
-  };
+  String _safeEngineMessage(String code) =>
+      tunnelErrorMessage(code, windows: Platform.isWindows);
 
   void _readNativeState(dynamic value) {
     if (value is! Map) return;
     final name = value['state'] as String?;
-    final message = value['message'] as String?;
+    final code = value['code'] as String?;
+    final message = code != null
+        ? _safeEngineMessage(code)
+        : value['message'] as String?;
     final state = switch (name) {
       'connecting' => TunnelState.connecting,
       'connected' => TunnelState.connected,

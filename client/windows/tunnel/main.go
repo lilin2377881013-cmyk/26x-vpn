@@ -58,11 +58,14 @@ func run() string {
 		[]xray.PingBatchItem{{XrayJSON: config, OutboundTag: "26x-proxy"}},
 		8, "https://cp.cloudflare.com/generate_204",
 	)
-	if err != nil || len(probes) != 1 || !probes[0].Success {
+	if err != nil {
+		return "probe_execution_failed"
+	}
+	if len(probes) != 1 || !probes[0].Success {
 		return "node_unreachable"
 	}
 	if err := xray.RunXray(config); err != nil {
-		return "tunnel_start_failed"
+		return "tunnel_core_failed"
 	}
 	fmt.Println("connected")
 	// Closing the app-owned pipe also releases the tunnel after an app crash.

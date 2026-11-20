@@ -25,6 +25,12 @@ jobs:
         with:
           flutter-version: '3.50.0'
           channel: stable
+      - name: Check client recovery tests
+        working-directory: client
+        run: |
+          flutter pub get
+          flutter analyze
+          flutter test
       - name: Build Windows tunnel
         shell: bash
         run: |
@@ -56,7 +62,7 @@ jobs:
         with:
           name: 26x-Windows-x64
           path: |
-            client/windows/26x-VPN-0.1.7-Setup-x64.exe
+            client/windows/26x-VPN-0.1.8-Setup-x64.exe
             client/windows/windows-package-report.json
             client/windows/windows-icon-preview.png
           if-no-files-found: error

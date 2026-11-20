@@ -210,7 +210,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
       if ready {
         self.finishStart(nil)
       } else {
-        self.failStart(self.tunnelError(1010, "VPN 数据通道未收到 DNS 应答。"))
+        self.failStart(self.tunnelError(1011, "VPN 数据通道未收到 DNS 应答。"))
       }
     }
   }
@@ -220,8 +220,8 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
     let response = LibXrayInvoke(request)
     guard let result = (try? JSONSerialization.jsonObject(with: Data(response.utf8))) as? [String: Any],
           result["success"] as? Bool == true else {
-      let code = method == "pingBatch" ? 1010 : 1005
-      throw tunnelError(code, method == "pingBatch" ? "VPN 节点未能转发 HTTPS 请求。" : "VPN 核心启动失败。")
+      let code = method == "pingBatch" ? 1012 : 1005
+      throw tunnelError(code, method == "pingBatch" ? "VPN 连通性检查模块执行失败。" : "VPN 核心启动失败。")
     }
     return result
   }

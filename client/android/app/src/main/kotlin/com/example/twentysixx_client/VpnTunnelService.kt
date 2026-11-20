@@ -65,7 +65,7 @@ class VpnTunnelService : VpnService() {
       if (checked.optJSONObject("data")?.optJSONArray("results")
           ?.optJSONObject(0)?.optBoolean("success") != true) {
         stopForegroundCompat()
-        TunnelRuntime.publish("error", "node_unreachable")
+        TunnelRuntime.publish("error", if (checked.optBoolean("success")) "node_unreachable" else "probe_execution_failed")
         stopSelf(startId)
         return
       }

@@ -201,8 +201,16 @@ private final class TunnelBridgePlugin: NSObject, FlutterPlugin, FlutterStreamHa
       return failure("tunnel_routes_failed", "系统未能配置 VPN 路由。")
     case 1005:
       return failure("tunnel_core_failed", "VPN 核心启动失败。")
-    case 1009, 1010:
-      return failure("node_unreachable", "VPN 节点连接检查失败。")
+    case 1006:
+      return failure("tunnel_data_failed", "VPN 数据通道已中断。")
+    case 1009:
+      return failure("node_dns_failed", "无法解析节点地址。")
+    case 1010:
+      return failure("node_unreachable", "节点 HTTPS 检查失败。")
+    case 1011:
+      return failure("tunnel_dns_failed", "隧道 DNS 未收到应答。")
+    case 1012:
+      return failure("probe_execution_failed", "连通性检查模块执行失败。")
     default:
       return failure("tunnel_start_failed", "VPN 隧道连接失败。")
     }

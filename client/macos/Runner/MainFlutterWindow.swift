@@ -206,9 +206,17 @@ private enum MacTunnelManager {
                 completion(nil)
               } else {
                 let report: (Error?) -> Void = { error in
-                  let underlying = error as NSError?
-                  let nodeFailure = underlying?.domain == "com.26xvpn.client.tunnel" && underlying?.code == 1010
-                  let code = nodeFailure ? "node_unreachable" : "tunnel_start_failed"
+                  var underlying = error as NSError?
+                  for _ in 0..<5 {
+                    if underlying?.domain == "com.26xvpn.client.tunnel" { break }
+                    underlying = underlying?.userInfo[NSUnderlyingErrorKey] as? NSError
+                  }
+                  let codes = [1001: "profile_invalid", 1003: "tunnel_routes_failed",
+                               1005: "tunnel_core_failed", 1006: "tunnel_data_failed",
+                               1009: "node_dns_failed", 1010: "node_unreachable",
+                               1011: "tunnel_dns_failed", 1012: "probe_execution_failed"]
+                  let code = underlying?.domain == "com.26xvpn.client.tunnel"
+                    ? codes[underlying?.code ?? 0] ?? "tunnel_start_failed" : "tunnel_start_failed"
                   completion(TunnelStartError(code: code, message: "VPN 隧道连接失败。"))
                 }
                 if #available(macOS 13.0, *), session.status == .disconnected {

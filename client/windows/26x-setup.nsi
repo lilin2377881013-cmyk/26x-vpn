@@ -3,15 +3,15 @@ Unicode true
 !include "x64.nsh"
 
 Name "26x VPN"
-OutFile "26x-VPN-0.1.7-Setup-x64.exe"
+OutFile "26x-VPN-0.1.8-Setup-x64.exe"
 InstallDir "$PROGRAMFILES64\26x VPN"
 RequestExecutionLevel admin
 SetCompressor /SOLID lzma
-VIProductVersion "0.1.7.23"
+VIProductVersion "0.1.8.24"
 VIAddVersionKey /LANG=2052 "ProductName" "26x VPN"
 VIAddVersionKey /LANG=2052 "CompanyName" "26x"
 VIAddVersionKey /LANG=2052 "FileDescription" "26x VPN 安装程序"
-VIAddVersionKey /LANG=2052 "FileVersion" "0.1.7.23"
+VIAddVersionKey /LANG=2052 "FileVersion" "0.1.8.24"
 VIAddVersionKey /LANG=2052 "LegalCopyright" "Copyright 2026 26x"
 
 !define MUI_ICON "runner\resources\app_icon.ico"
@@ -48,7 +48,7 @@ Section "26x VPN"
   CreateShortcut "$SMPROGRAMS\26x VPN.lnk" "$INSTDIR\twentysixx_client.exe"
   CreateShortcut "$DESKTOP\26x VPN.lnk" "$INSTDIR\twentysixx_client.exe"
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\26xVPN" "DisplayName" "26x VPN"
-  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\26xVPN" "DisplayVersion" "0.1.7"
+  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\26xVPN" "DisplayVersion" "0.1.8"
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\26xVPN" "Publisher" "26x"
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\26xVPN" "InstallLocation" "$INSTDIR"
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\26xVPN" "URLInfoAbout" "https://26xvpn.com"

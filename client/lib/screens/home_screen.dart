@@ -339,7 +339,7 @@ class _HomeScreenState extends State<HomeScreen> {
     if (_tunnelState.state == TunnelState.connected) {
       await widget.tunnel.disconnect();
     }
-    await (_releaseInFlight ?? Future<void>.value());
+    await _releaseLease();
     String? signOutError;
     try {
       await widget.api.signOut();
@@ -349,6 +349,11 @@ class _HomeScreenState extends State<HomeScreen> {
       if (mounted) {
         setState(() {
           _tab = 0;
+          _renewal?.cancel();
+          _leaseExpiry?.cancel();
+          _leaseInvalid = true;
+          _lease = null;
+          _leaseApi = null;
           _account = null;
           _authRequested = false;
           _devices = [];
@@ -1316,14 +1321,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                     const SizedBox(height: 24),
                     OutlinedButton(
-                      onPressed:
-                          _busy ||
-                              _isConnecting ||
-                              (_hasMembership &&
-                                  _connectionDevice == null &&
-                                  !_isConnected)
-                          ? null
-                          : _toggleTunnel,
+                      onPressed: _busy || _isConnecting ? null : _toggleTunnel,
                       style: OutlinedButton.styleFrom(
                         fixedSize: Size.square(
                           bounds.maxHeight < 460 ? 128 : 164,
@@ -1569,6 +1567,22 @@ class _HomeScreenState extends State<HomeScreen> {
       }
       return;
     }
+    if (_connectionDevice == null) {
+      setState(() => _busy = true);
+      try {
+        await _loadDevices();
+      } catch (error) {
+        if (mounted) setState(() => _message = error.toString());
+        return;
+      } finally {
+        if (mounted) setState(() => _busy = false);
+      }
+      if (!mounted) return;
+      if (_connectionDevice == null) {
+        setState(() => _message = '设备登记 [DEVICE-REGISTER]：未能自动登记本机，请刷新后重试。');
+        return;
+      }
+    }
     await _connectTo(_selectedNode);
   }
 
@@ -1580,7 +1594,11 @@ class _HomeScreenState extends State<HomeScreen> {
     final device = _connectionDevice;
     final api = _vpnApi;
     if (requested == null || device == null) {
-      setState(() => _message = '当前没有可连接节点。');
+      setState(
+        () => _message = device == null
+            ? '设备登记 [DEVICE-REGISTER]：本机尚未登记，请刷新后重试。'
+            : '节点列表 [API-NODES-EMPTY]：当前没有可连接节点，请刷新后重试。',
+      );
       return;
     }
     setState(() {
@@ -1665,7 +1683,9 @@ class _HomeScreenState extends State<HomeScreen> {
             !node.connectable) {
           await _releaseLease();
           if (mounted) {
-            setState(() => _message = '节点配置尚未就绪，请稍后重试。');
+            setState(
+              () => _message = '节点配置 [NODE-CONFIG-PENDING]：服务器仍在准备本机配置，请稍后重试。',
+            );
           }
           return;
         }

@@ -44,7 +44,7 @@ func (s *server) checkout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if unlimited {
-		writeError(w, http.StatusConflict, "unlimited_subscription", "当前账号已有永久会员")
+		writeError(w, http.StatusConflict, "unlimited_subscription", "当前账号已是永久会员，无需续费")
 		return
 	}
 	token, err := randomToken(18)

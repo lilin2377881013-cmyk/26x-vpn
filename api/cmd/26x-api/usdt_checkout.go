@@ -51,11 +51,24 @@ func (s *server) checkoutSelection(w http.ResponseWriter, r *http.Request, code 
 	}
 	defer tx.Rollback()
 	user := actorFromContext(r).id
-	var allowed bool
-	err = tx.QueryRowContext(r.Context(), `SELECT status='active' AND NOT EXISTS(SELECT 1 FROM trial_accounts WHERE user_id=users.id)
- AND NOT EXISTS(SELECT 1 FROM subscriptions WHERE user_id=users.id AND status='active' AND ends_at IS NULL) FROM users WHERE id=$1 FOR UPDATE`, user).Scan(&allowed)
-	if err != nil || !allowed {
-		writeError(w, 409, "checkout_not_allowed", "Please sign in with an eligible account")
+	var status string
+	var trial, permanent bool
+	err = tx.QueryRowContext(r.Context(), `SELECT status, EXISTS(SELECT 1 FROM trial_accounts WHERE user_id=users.id),
+ EXISTS(SELECT 1 FROM subscriptions WHERE user_id=users.id AND status='active' AND ends_at IS NULL) FROM users WHERE id=$1 FOR UPDATE`, user).Scan(&status, &trial, &permanent)
+	if err != nil {
+		writeError(w, 503, "checkout_failed", "暂时无法读取账号状态，请稍后重试")
+		return
+	}
+	if status != "active" {
+		writeError(w, 409, "checkout_not_allowed", "当前账号不可购买，请联系客服")
+		return
+	}
+	if trial {
+		writeError(w, 409, "trial_checkout", "请先注册或登录正式账号，再购买会员")
+		return
+	}
+	if permanent {
+		writeError(w, 409, "unlimited_subscription", "当前账号已是永久会员，无需续费")
 		return
 	}
 	var count int

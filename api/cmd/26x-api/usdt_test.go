@@ -416,6 +416,53 @@ func TestUSDTCheckoutMonitorAndReplay(t *testing.T) {
 	if w := choose(d, "alipay"); w.Code != 303 {
 		t.Fatal("retry failed unexpectedly", w.Code)
 	}
+	// Active, finite members can renew before expiry; settlement appends time.
+	renewUser := user("early-renewal")
+	var originalEnd time.Time
+	if err := db.QueryRow(`INSERT INTO subscriptions(user_id,plan_id,status,starts_at,ends_at)
+ SELECT $1,id,'active',now()-interval '20 days',now()+interval '10 days' FROM plans WHERE code='standard-30d' RETURNING ends_at`, renewUser).Scan(&originalEnd); err != nil {
+		t.Fatal(err)
+	}
+	renewOrder := makeOrder(renewUser)
+	if err := s.pollUSDT(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if w := choose(renewOrder, "usdt"); w.Code != 303 {
+		t.Fatal("active member could not renew", w.Code, w.Body.String())
+	}
+	for replay := 0; replay < 2; replay++ {
+		tx, err := db.BeginTx(ctx, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := s.grantOrderTx(ctx, tx, renewOrder.number, "renewal-fixture-serial", "usdt"); err != nil {
+			tx.Rollback()
+			t.Fatal(err)
+		}
+		if err := tx.Commit(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var renewalStart, renewalEnd time.Time
+	var subscriptionCount int
+	if err := db.QueryRow(`SELECT sub.starts_at,sub.ends_at FROM payment_orders o JOIN subscriptions sub ON sub.id=o.subscription_id WHERE o.order_no=$1`, renewOrder.number).Scan(&renewalStart, &renewalEnd); err != nil {
+		t.Fatal(err)
+	}
+	db.QueryRow(`SELECT count(*) FROM subscriptions WHERE user_id=$1`, renewUser).Scan(&subscriptionCount)
+	if !renewalStart.Equal(originalEnd) || !renewalEnd.Equal(originalEnd.AddDate(0, 0, 30)) || subscriptionCount != 2 {
+		t.Fatal("renewal lost remaining time or replay issued extra membership")
+	}
+	permanentUser := user("permanent-checkout")
+	if _, err := db.Exec(`INSERT INTO subscriptions(user_id,plan_id,status,starts_at,ends_at) SELECT $1,id,'active',now(),NULL FROM plans WHERE code='standard-30d'`, permanentUser); err != nil {
+		t.Fatal(err)
+	}
+	permanentRequest := httptest.NewRequest("POST", "/api/v1/me/checkout", strings.NewReader(`{"planCode":"standard-30d"}`))
+	permanentRequest.Header.Set("Content-Type", "application/json")
+	permanentResponse := httptest.NewRecorder()
+	s.checkout(permanentResponse, permanentRequest.WithContext(contextWithActor(permanentRequest, actor{id: permanentUser})))
+	if permanentResponse.Code != 409 || !strings.Contains(permanentResponse.Body.String(), "永久会员，无需续费") {
+		t.Fatal("permanent membership rejection was unclear", permanentResponse.Code, permanentResponse.Body.String())
+	}
 	// Once new USDT payments are disabled, existing confirmed transfers still settle.
 	s.cfg.usdt.accepting = false
 	e := orders[0]

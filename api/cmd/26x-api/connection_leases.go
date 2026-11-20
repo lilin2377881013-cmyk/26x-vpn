@@ -211,11 +211,14 @@ func (s *server) acquireConnectionLease(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 		hash := sha256.Sum256([]byte(token))
+		// A restarted client may have lost its lease token while the previous
+		// process still renews. Replace the same owned device's lease atomically:
+		// it remains one slot, and old heartbeats/releases cannot touch the new token.
 		err = tx.QueryRowContext(ctx, `INSERT INTO connection_leases (device_id,user_id,token_hash,expires_at,endpoint_id)
 			VALUES ($1,$2,$3,LEAST(clock_timestamp()+($4 * interval '1 second'), $6::timestamptz),$5)
 			ON CONFLICT (device_id) DO UPDATE SET token_hash=EXCLUDED.token_hash,
 				expires_at=EXCLUDED.expires_at, acquired_at=now(), endpoint_id=EXCLUDED.endpoint_id
-			WHERE connection_leases.expires_at <= clock_timestamp()
+			WHERE connection_leases.user_id = EXCLUDED.user_id
 			RETURNING expires_at`, device, user.id, hash[:], int(connectionLeaseLifetime.Seconds()), endpoint, subscriptionEnd).Scan(&expires)
 		if errors.Is(err, sql.ErrNoRows) {
 			writeError(w, http.StatusConflict, "device_already_connected", "This device already holds a connection")

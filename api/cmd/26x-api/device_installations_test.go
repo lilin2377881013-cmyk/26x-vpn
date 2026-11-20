@@ -79,6 +79,26 @@ func TestInstallationEnrollmentAndConnectionLimits(t *testing.T) {
 				if w.Code != expected {
 					t.Fatalf("expected lease status %d, got %d %s", expected, w.Code, w.Body.String())
 				}
+				if i == 0 {
+					var oldLease, newLease struct{ Token string }
+					if err := json.Unmarshal(w.Body.Bytes(), &oldLease); err != nil {
+						t.Fatal(err)
+					}
+					reconnected := call(s.acquireConnectionLease, `{}`, id)
+					if reconnected.Code != 200 || json.Unmarshal(reconnected.Body.Bytes(), &newLease) != nil || newLease.Token == oldLease.Token {
+						t.Fatal("same-device restart did not replace the old lease", reconnected.Code)
+					}
+					oldBody := fmt.Sprintf(`{"token":%q}`, oldLease.Token)
+					if stale := call(s.acquireConnectionLease, oldBody, id); stale.Code != 409 {
+						t.Fatal("old process renewed a replaced lease", stale.Code)
+					}
+					if released := call(s.releaseConnectionLease, oldBody, id); released.Code != 204 {
+						t.Fatal("stale release failed", released.Code)
+					}
+					if current := call(s.acquireConnectionLease, fmt.Sprintf(`{"token":%q}`, newLease.Token), id); current.Code != 200 {
+						t.Fatal("old release deleted the replacement lease", current.Code)
+					}
+				}
 			}
 			if w := call(s.revokeDevice, `{}`, devices[len(devices)-1]); w.Code != 204 {
 				t.Fatalf("failed to remove a device: %d %s", w.Code, w.Body.String())

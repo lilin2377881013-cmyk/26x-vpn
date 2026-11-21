@@ -38,6 +38,15 @@ String tunnelErrorMessage(String code, {bool windows = false}) =>
       'tunnel_dns_failed' => '隧道 DNS [VPN-TUN-DNS]：隧道启动后未收到 DNS 应答。',
       'tunnel_data_failed' => '隧道传输 [VPN-DATA]：VPN 数据通道已中断。',
       'tunnel_routes_failed' => '系统路由 [VPN-ROUTES]：系统未能配置 VPN 路由。',
+      'system_dns_failed' =>
+        '系统 DNS [VPN-SYSTEM-DNS]：隧道 DNS 已应答，但 Windows 未能解析检测域名。',
+      'worker_system_dns_rollback_timeout' =>
+        '系统 DNS [VPN-SYSTEM-DNS-ROLLBACK]：隧道 DNS 已应答，Windows 解析失败，清理超时后进程已退出。',
+      'adapter_busy' => '虚拟网卡 [VPN-ADAPTER-BUSY]：重试后网卡仍在使用中。',
+      'adapter_dns_failed' => '网卡 DNS [VPN-ADAPTER-DNS]：Windows 未能设置虚拟网卡 DNS。',
+      'tunnel_filter_failed' => '网络筛选 [VPN-FILTER]：Windows 未能应用隧道 DNS 保护规则。',
+      _ when windows && RegExp(r'^windows_core_[0-9]{1,10}$').hasMatch(code) =>
+        '核心启动 [VPN-CORE]：Windows 错误 ${code.substring("windows_core_".length)}。',
       'tunnel_core_failed' => '核心启动 [VPN-CORE]：VPN 核心启动失败。',
       'tunnel_start_timeout' => '隧道启动 [VPN-START-TIMEOUT]：启动超时，已取消，请重新连接。',
       'worker_exit_2' => '隧道进程 [VPN-WORKER-EXIT-2]：启动时意外退出，退出码 2。',

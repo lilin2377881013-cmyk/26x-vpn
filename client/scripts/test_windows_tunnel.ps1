@@ -1,4 +1,4 @@
-param([Parameter(Mandatory = $true)][string]$Directory, [Parameter(Mandatory = $true)][guid]$PeerId, [ValidateSet('Healthy','Blocked','Crash')][string]$Scenario = 'Healthy')
+param([Parameter(Mandatory = $true)][string]$Directory, [Parameter(Mandatory = $true)][guid]$PeerId, [ValidateSet('Healthy','Blocked','NoDns','Crash','FastSwitch')][string]$Scenario = 'Healthy')
 $ErrorActionPreference = 'Stop'
 
 # Connect the installed worker to a loopback-only test node through VLESS.
@@ -12,6 +12,7 @@ if ($Scenario -eq 'Blocked') {
     # ordinary OS sockets. Startup must roll back without a disconnect command.
     $config.routing.rules[0].outboundTag = 'block'
 }
+if ($Scenario -eq 'NoDns') { $config.outbounds[0].settings.port = 25438 }
 function Get-UplinkDns {
     $routes = Get-NetRoute -AddressFamily IPv4 -DestinationPrefix '0.0.0.0/0'
     return @($routes | Sort-Object InterfaceIndex -Unique | ForEach-Object {
@@ -45,7 +46,9 @@ try {
         if ($remaining -le 0 -or -not $ready.Wait($remaining)) { throw 'Windows TUN startup timed out' }
         $line = $ready.Result
         if ($Scenario -eq 'Blocked' -and $line -eq 'tunnel_data_failed') { break }
+        if ($Scenario -eq 'NoDns' -and $line -eq 'tunnel_dns_failed') { break }
         if ($line -eq 'connected') {
+            if ($Scenario -eq 'NoDns') { throw 'Worker reported connected despite blocked DNS' }
             if ($Scenario -eq 'Blocked') { throw 'Worker reported connected despite blocked HTTPS' }
             break
         }
@@ -53,8 +56,22 @@ try {
         Write-Host "Worker startup: $line"
     }
     $tailOutput = $worker.StandardOutput.ReadToEndAsync()
-    if ($Scenario -eq 'Blocked') {
+    if ($Scenario -in @('Blocked', 'NoDns')) {
         if (-not $worker.WaitForExit(12000) -or $worker.ExitCode -ne 1) { throw 'Broken data path did not roll back' }
+    } elseif ($Scenario -eq 'FastSwitch') {
+        $worker.Kill()
+        if (-not $worker.WaitForExit(10000)) { throw 'First worker did not terminate' }
+        $worker.Dispose()
+        $worker = [Diagnostics.Process]::new()
+        $worker.StartInfo = $start
+        $started = $worker.Start()
+        $diagnostics = $worker.StandardError.ReadToEndAsync()
+        $config.outbounds[0].settings.port = 25437
+        $worker.StandardInput.WriteLine(($config | ConvertTo-Json -Depth 12 -Compress))
+        $worker.StandardInput.Flush()
+        $ready = $worker.StandardOutput.ReadLineAsync()
+        if (-not $ready.Wait(42000) -or $ready.Result -ne 'connected') { throw 'Immediate switch to the second endpoint failed' }
+        $tailOutput = $worker.StandardOutput.ReadToEndAsync()
     } elseif ($Scenario -eq 'Crash') {
         $worker.Kill()
         if (-not $worker.WaitForExit(10000)) { throw 'Worker did not terminate' }
@@ -73,6 +90,8 @@ try {
                 return ([int]$answer[6] * 256 + [int]$answer[7])
             } finally { $udp.Dispose() }
         }
+        $dnsRoute = Get-NetRoute -DestinationPrefix '10.26.0.2/32' -InterfaceAlias '26x-tun' -ErrorAction Stop
+        if (-not $dnsRoute) { throw 'Missing tunnel DNS host route' }
         $a = Query-TunnelDns 1
         $aaaa = Query-TunnelDns 28
         Write-Host "Windows DNS answers: A=$a AAAA=$aaaa"

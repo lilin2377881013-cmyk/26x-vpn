@@ -1,5 +1,5 @@
 $ErrorActionPreference = 'Stop'
-$installer = Join-Path $PSScriptRoot '..\windows\26x-VPN-0.1.10-Setup-x64.exe'
+$installer = Join-Path $PSScriptRoot '..\windows\26x-VPN-0.1.11-Setup-x64.exe'
 $directory = Join-Path $env:ProgramFiles '26x VPN'
 $registry = 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\26xVPN'
 $process = Start-Process -FilePath $installer -ArgumentList '/S' -PassThru -Wait
@@ -9,7 +9,7 @@ try {
         if (-not (Test-Path (Join-Path $directory $file))) { throw "Missing installed file: $file" }
     }
     $entry = Get-ItemProperty $registry
-    if ($entry.DisplayVersion -ne '0.1.10') { throw 'Wrong installed version' }
+    if ($entry.DisplayVersion -ne '0.1.11') { throw 'Wrong installed version' }
     $shortcut = Join-Path ([Environment]::GetFolderPath('CommonStartMenu')) 'Programs\26x VPN.lnk'
     if (-not (Test-Path $shortcut)) { throw 'Start menu shortcut missing' }
     Add-Type -AssemblyName System.Drawing
@@ -28,8 +28,11 @@ try {
     if (-not $uplink) { throw 'Unable to identify the test uplink' }
     $peerId = [guid]::NewGuid()
     $relayConfig = @{
-        inbounds = @(@{ listen = '127.0.0.1'; port = 25436; protocol = 'vless'; settings = @{ clients = @(@{ id = $peerId.ToString() }); decryption = 'none' } })
-        outbounds = @(@{ protocol = 'freedom'; settings = @{ domainStrategy = 'UseIPv4' }; streamSettings = @{ sockopt = @{ interface = $uplink } } })
+        inbounds = @(25436, 25437, 25438 | ForEach-Object {
+            @{ tag = "relay-$_"; listen = '127.0.0.1'; port = $_; protocol = 'vless'; settings = @{ clients = @(@{ id = $peerId.ToString() }); decryption = 'none' } }
+        })
+        outbounds = @(@{ tag = 'direct'; protocol = 'freedom'; settings = @{ domainStrategy = 'UseIPv4' }; streamSettings = @{ sockopt = @{ interface = $uplink } } }, @{ tag = 'drop'; protocol = 'blackhole' })
+        routing = @{ rules = @(@{ type = 'field'; inboundTag = @('relay-25438'); ip = @('1.1.1.1/32','1.0.0.1/32'); port = '443'; outboundTag = 'drop' }) }
     }
     $configPath = Join-Path $env:RUNNER_TEMP '26x-relay.json'
     $relayConfig | ConvertTo-Json -Depth 10 | Set-Content -Encoding utf8NoBOM $configPath
@@ -41,7 +44,7 @@ try {
             if (Get-NetTCPConnection -LocalPort 25436 -State Listen -ErrorAction SilentlyContinue | Where-Object OwningProcess -eq $relay.Id) { break }
             Start-Sleep -Milliseconds 250
         }
-        foreach ($scenario in @('Blocked', 'Crash', 'Healthy')) {
+        foreach ($scenario in @('Blocked', 'NoDns', 'Crash', 'FastSwitch', 'Healthy')) {
             & (Join-Path $PSScriptRoot 'test_windows_tunnel.ps1') -Directory $directory -PeerId $peerId -Scenario $scenario
         }
     } finally {
@@ -50,7 +53,7 @@ try {
         Remove-Item $configPath
     }
     $signature = Get-AuthenticodeSignature $installer
-    $report = [ordered]@{ version = '0.1.10'; build = 26; installation = 'passed'; runtimeAssets = 'passed'; workerInputValidation = 'passed'; postTunnelFailureRollback = 'passed'; forcedExitRecovery = 'passed'; nativeTunnelDnsAndRouteCleanup = 'passed'; authenticodeStatus = $signature.Status.ToString(); sha256 = (Get-FileHash $installer -Algorithm SHA256).Hash.ToLower() }
+    $report = [ordered]@{ version = '0.1.11'; build = 27; installation = 'passed'; runtimeAssets = 'passed'; workerInputValidation = 'passed'; postTunnelFailureRollback = 'passed'; dnsFailureRollback = 'passed'; immediateSwitchAfterExit = 'passed'; forcedExitRecovery = 'passed'; nativeTunnelDnsAndRouteCleanup = 'passed'; authenticodeStatus = $signature.Status.ToString(); sha256 = (Get-FileHash $installer -Algorithm SHA256).Hash.ToLower() }
 } finally {
     $uninstaller = Join-Path $directory 'Uninstall.exe'
     if (Test-Path $uninstaller) {

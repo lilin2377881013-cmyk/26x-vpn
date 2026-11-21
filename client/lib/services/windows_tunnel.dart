@@ -52,19 +52,25 @@ class WindowsTunnel {
             if (line == 'connected') {
               complete(const {'state': 'connected'});
             } else if (const {
-              'vpn_permission_denied',
-              'engine_unavailable',
-              'profile_invalid',
-              'node_unreachable',
-              'node_dns_failed',
-              'tunnel_busy',
-              'tunnel_dns_failed',
-              'tunnel_data_failed',
-              'probe_execution_failed',
-              'tunnel_core_failed',
-              'tunnel_start_failed',
-              'tunnel_stop_failed',
-            }.contains(line)) {
+                  'vpn_permission_denied',
+                  'engine_unavailable',
+                  'profile_invalid',
+                  'node_unreachable',
+                  'node_dns_failed',
+                  'tunnel_busy',
+                  'tunnel_dns_failed',
+                  'tunnel_data_failed',
+                  'probe_execution_failed',
+                  'tunnel_core_failed',
+                  'tunnel_routes_failed',
+                  'system_dns_failed',
+                  'adapter_dns_failed',
+                  'adapter_busy',
+                  'tunnel_filter_failed',
+                  'tunnel_start_failed',
+                  'tunnel_stop_failed',
+                }.contains(line) ||
+                RegExp(r'^windows_core_[0-9]{1,10}$').hasMatch(line)) {
               complete({'code': line});
             }
           },
@@ -78,6 +84,7 @@ class WindowsTunnel {
                 70 => 'worker_cleanup_timeout',
                 71 => 'worker_dns_rollback_timeout',
                 72 => 'worker_data_rollback_timeout',
+                73 => 'worker_system_dns_rollback_timeout',
                 _ => 'tunnel_start_failed',
               },
             });

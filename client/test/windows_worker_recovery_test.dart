@@ -45,6 +45,7 @@ Future<void> main() async {
         (70, 'worker_cleanup_timeout'),
         (71, 'worker_dns_rollback_timeout'),
         (72, 'worker_data_rollback_timeout'),
+        (73, 'worker_system_dns_rollback_timeout'),
       ]) {
         expect((await tunnel.connect('exit=$exitCode'))['code'], reason);
       }

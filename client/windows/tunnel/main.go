@@ -14,9 +14,12 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
+	"syscall"
 	"time"
 
+	"github.com/miekg/dns"
 	"github.com/xtls/libxray/xray"
 	"go4.org/netipx"
 	"golang.org/x/sys/windows"
@@ -34,9 +37,10 @@ const tunnelDNS = "10.26.0.2"
 // Reserved worker exit codes let the UI identify a watchdog exit even if the
 // core cannot finish shutting down or flush its ordinary error response.
 const (
-	exitCleanupTimeout      = 70
-	exitDNSRollbackTimeout  = 71
-	exitDataRollbackTimeout = 72
+	exitCleanupTimeout           = 70
+	exitDNSRollbackTimeout       = 71
+	exitDataRollbackTimeout      = 72
+	exitSystemDNSRollbackTimeout = 73
 )
 
 var errNodeDNS = errors.New("node address lookup failed")
@@ -101,8 +105,8 @@ func run() string {
 	if ctx.Err() != nil {
 		return ""
 	}
-	if err := xray.RunXray(config); err != nil {
-		return "tunnel_core_failed"
+	if code := startCore(ctx, config, xray.RunXray); code != "" {
+		return code
 	}
 	result := checkDataPath(ctx)
 	if ctx.Err() == nil && result == "" {
@@ -120,6 +124,8 @@ func run() string {
 			os.Exit(exitDNSRollbackTimeout)
 		case "tunnel_data_failed":
 			os.Exit(exitDataRollbackTimeout)
+		case "system_dns_failed":
+			os.Exit(exitSystemDNSRollbackTimeout)
 		default:
 			os.Exit(exitCleanupTimeout)
 		}
@@ -129,6 +135,48 @@ func run() string {
 		return "tunnel_stop_failed"
 	}
 	return result
+}
+
+// Only a busy adapter is retried. The worker holds the single-instance mutex,
+// so it cannot race a second 26x worker while Windows releases the old device.
+func startCore(ctx context.Context, config string, start func(string) error) string {
+	for attempt := 0; ; attempt++ {
+		if ctx.Err() != nil {
+			return "tunnel_start_failed"
+		}
+		err := start(config)
+		if err == nil {
+			return ""
+		}
+		busy := errors.Is(err, windows.ERROR_BUSY) || errors.Is(err, windows.ERROR_DEVICE_IN_USE) ||
+			errors.Is(err, windows.ERROR_ALREADY_INITIALIZED) || errors.Is(err, windows.ERROR_ALREADY_EXISTS) ||
+			errors.Is(err, windows.ERROR_SHARING_VIOLATION)
+		if !busy {
+			// Only pass known stage names or a numeric OS error to the UI.
+			message := err.Error()
+			switch {
+			case strings.Contains(message, "unable to set routes"), strings.Contains(message, "unable to set ips"), strings.Contains(message, "unable to set metric and MTU"):
+				return "tunnel_routes_failed"
+			case strings.Contains(message, "unable to set DNS"):
+				return "adapter_dns_failed"
+			case strings.Contains(message, "outside the TUN (remove autoSystemWfpBlockLeak"):
+				return "tunnel_filter_failed"
+			}
+			var errno syscall.Errno
+			if errors.As(err, &errno) {
+				return fmt.Sprintf("windows_core_%d", uint32(errno))
+			}
+			return "tunnel_core_failed"
+		}
+		if attempt == 2 {
+			return "adapter_busy"
+		}
+		select {
+		case <-ctx.Done():
+			return "tunnel_start_failed"
+		case <-time.After(time.Duration(attempt+1) * 400 * time.Millisecond):
+		}
+	}
 }
 
 func checkDataPath(parent context.Context) string {
@@ -141,7 +189,17 @@ func checkDataPath(parent context.Context) string {
 	for _, host := range hosts {
 		go func() {
 			resolver := &net.Resolver{}
-			ips, err := resolver.LookupNetIP(ctx, "ip4", host)
+			// Windows can briefly answer from the previous adapter during a switch.
+			first, stop := context.WithTimeout(ctx, 4*time.Second)
+			ips, err := resolver.LookupNetIP(first, "ip4", host)
+			stop()
+			if (err != nil || len(ips) == 0) && ctx.Err() == nil {
+				select {
+				case <-ctx.Done():
+				case <-time.After(300 * time.Millisecond):
+					ips, err = resolver.LookupNetIP(ctx, "ip4", host)
+				}
+			}
 			if err != nil || len(ips) == 0 {
 				results <- "tunnel_dns_failed"
 				return
@@ -172,6 +230,22 @@ func checkDataPath(parent context.Context) string {
 		}
 		if result == "tunnel_data_failed" {
 			failure = result
+		}
+	}
+	if failure == "tunnel_dns_failed" && parent.Err() == nil {
+		// A direct query is diagnostic only. A working Windows system lookup
+		// and a successful HTTPS request are still required to report connected.
+		probeCtx, stop := context.WithTimeout(parent, 2*time.Second)
+		defer stop()
+		question := new(dns.Msg)
+		question.SetQuestion(dns.Fqdn(hosts[0]), dns.TypeA)
+		response, _, err := (&dns.Client{Net: "udp4"}).ExchangeContext(probeCtx, question, net.JoinHostPort(tunnelDNS, "53"))
+		if err == nil && response.Rcode == dns.RcodeSuccess {
+			for _, answer := range response.Answer {
+				if _, ok := answer.(*dns.A); ok {
+					return "system_dns_failed"
+				}
+			}
 		}
 	}
 	return failure
@@ -242,7 +316,10 @@ func configure(ctx context.Context, raw []byte, directCIDRs string) (string, err
 		peer["address"] = endpoint.Unmap().String()
 		// Preserve TLS/Reality serverName. Windows uses its existing route to
 		// this exact peer even on a hotspot, Ethernet + Wi-Fi, or after roaming.
-		delete(settings, "autoOutboundsInterface")
+		// An omitted option enables Xray's automatic binding when routes
+		// exist. On Windows that picker prefers Wi-Fi even when another
+		// interface carries the peer. An explicit empty string disables it.
+		settings["autoOutboundsInterface"] = ""
 		break
 	}
 	if !endpoint.IsValid() {
@@ -251,6 +328,13 @@ func configure(ctx context.Context, raw []byte, directCIDRs string) (string, err
 	routes, err := tunnelRoutes(directCIDRs, endpoint)
 	if err != nil {
 		return "", err
+	}
+	if endpoint.Unmap() == netip.MustParseAddr(tunnelDNS) {
+		return "", errors.New("node address collides with the tunnel DNS address")
+	}
+	// Keep this DNS address on the TUN even with overlapping LAN/VPN subnets.
+	if !slices.Contains(routes, tunnelDNS+"/32") {
+		routes = append(routes, tunnelDNS+"/32")
 	}
 	settings["autoSystemRoutingTable"] = routes
 	config["dns"] = map[string]any{

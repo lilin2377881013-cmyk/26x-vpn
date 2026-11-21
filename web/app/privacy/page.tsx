@@ -1,5 +1,14 @@
 import Link from "next/link";
 
 export default function PrivacyPage() {
-  return <main className="legal-shell"><Link className="brand" href="/"><span className="brand-mark">26</span><span className="brand-x">x</span></Link><div className="eyebrow legal-eyebrow">26x / PRIVACY</div><h1>隐私说明</h1><p className="legal-draft">开发稿 · 正式发布前需由 26x 运营方确认实际数据处理方式。</p><h2>数据最小化原则</h2><p>26x 的产品设计目标是不记录用户访问的网页、DNS 查询目的地或网络内容。账号、设备、订阅状态、连接结果和必要的字节用量可能用于提供服务、排障和执行服务规则。</p><h2>官网推广统计</h2><p>通过代理链接访问官网时，我们按日期统计页面访问和下载按钮点击。设备信息用于归类为 iPhone、Android 或电脑等类型，代理报表只保留分类汇总。</p><h2>控制与删除</h2><p>正式版本将说明每类数据的用途、保存期限、访问权限和删除方式。当前开发稿不代表生产系统已经完成这些控制。</p><h2>联系 26x</h2><p>正式客服渠道确认后会在此页公布。</p><Link className="text-link" href="/">返回首页 →</Link></main>;
+  return <main className="legal-shell">
+    <Link className="brand" href="/" aria-label="26x 首页"><span className="brand-mark">26</span><span className="brand-x">x</span></Link>
+    <h1>隐私说明</h1>
+    <h2>账号与设备</h2><p>官网和客户端使用同一个邮箱账号。密码以加盐哈希保存。登录官网时，浏览器会保存会话和请求验证 Cookie，用于识别账号和保护付款等操作。网页登录不会登记为 VPN 设备。</p>
+    <h2>连接与服务</h2><p>客户端登记设备信息。服务端使用设备、连接名额、订阅状态和流量计数来提供连接、执行套餐规则和排查故障。</p>
+    <h2>订单与付款</h2><p>开通或续费时，订单会关联到当前账号。系统使用订单号、金额和支付状态核对到账。USDT 使用公开区块链，链上转账记录可公开查询。</p>
+    <h2>推广统计</h2><p>通过推广链接访问官网时，系统按日期和设备类别汇总访问和下载点击次数，供推广方查看。</p>
+    <p>有关账号或订单的数据问题，可在客户端个人中心联系 26x。</p>
+    <Link className="text-link" href="/">返回官网 →</Link>
+  </main>;
 }

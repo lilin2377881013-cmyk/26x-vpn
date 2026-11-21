@@ -261,7 +261,7 @@ func TestUSDTCheckoutMonitorAndReplay(t *testing.T) {
 	r.SetPathValue("token", a.token)
 	w := httptest.NewRecorder()
 	s.cashierPage(w, r)
-	if w.Code != 200 || !strings.Contains(w.Body.String(), "5.000001") || !strings.Contains(w.Body.String(), testUSDTWallet) || w.Header().Get("Cache-Control") != "no-store" {
+	if w.Code != 200 || !strings.Contains(w.Body.String(), "5.000001") || !strings.Contains(w.Body.String(), testUSDTWallet) || w.Header().Get("Cache-Control") != "no-store" || w.Header().Get("Referrer-Policy") != "strict-origin" {
 		t.Fatal("cashier missing exact amount/address or privacy headers")
 	}
 	qr := httptest.NewRecorder()
@@ -451,6 +451,28 @@ func TestUSDTCheckoutMonitorAndReplay(t *testing.T) {
 	db.QueryRow(`SELECT count(*) FROM subscriptions WHERE user_id=$1`, renewUser).Scan(&subscriptionCount)
 	if !renewalStart.Equal(originalEnd) || !renewalEnd.Equal(originalEnd.AddDate(0, 0, 30)) || subscriptionCount != 2 {
 		t.Fatal("renewal lost remaining time or replay issued extra membership")
+	}
+	// Only contiguous purchased periods extend the displayed expiration.
+	if _, err := db.Exec(`INSERT INTO subscriptions(user_id,plan_id,status,starts_at,ends_at)
+	 SELECT $1,id,'active',$2::timestamptz+interval '10 days',$2::timestamptz+interval '40 days'
+	 FROM plans WHERE code='premium-30d'`, renewUser, renewalEnd); err != nil {
+		t.Fatal(err)
+	}
+	me := httptest.NewRequest("GET", "/api/v1/me", nil)
+	view := httptest.NewRecorder()
+	s.userMe(view, me.WithContext(contextWithActor(me, actor{id: renewUser})))
+	var member struct{ PlanTier, SubscriptionEndsAt string }
+	if view.Code != 200 || json.Unmarshal(view.Body.Bytes(), &member) != nil || member.SubscriptionEndsAt != renewalEnd.UTC().Format(time.RFC3339) || member.PlanTier != "standard" {
+		t.Fatal("incorrect current tier or renewed expiration", view.Code)
+	}
+	history := httptest.NewRequest("GET", "/api/v1/me/orders", nil)
+	list := httptest.NewRecorder()
+	s.myOrders(list, history.WithContext(contextWithActor(history, actor{id: renewUser})))
+	var memberOrders struct {
+		Items []struct{ OrderNo, Status, UsdtAmount string }
+	}
+	if list.Code != 200 || json.Unmarshal(list.Body.Bytes(), &memberOrders) != nil || len(memberOrders.Items) != 1 || memberOrders.Items[0].OrderNo != renewOrder.number || memberOrders.Items[0].Status != "paid" || memberOrders.Items[0].UsdtAmount == "" {
+		t.Fatal("incorrect member order history", list.Code)
 	}
 	permanentUser := user("permanent-checkout")
 	if _, err := db.Exec(`INSERT INTO subscriptions(user_id,plan_id,status,starts_at,ends_at) SELECT $1,id,'active',now(),NULL FROM plans WHERE code='standard-30d'`, permanentUser); err != nil {

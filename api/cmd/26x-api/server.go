@@ -104,6 +104,7 @@ func (s *server) routes() http.Handler {
 	mux.HandleFunc("GET /api/v1/admin/usdt/transfers", s.requireAdmin(s.listUSDTTransfers, "owner", "operations"))
 	mux.HandleFunc("GET /api/v1/admin/orders", s.requireAdmin(s.listPaymentOrders, "owner", "operations"))
 	mux.HandleFunc("GET /api/v1/me", s.requireUser(s.userMe))
+	mux.HandleFunc("GET /api/v1/me/orders", s.requireUser(s.myOrders))
 	mux.HandleFunc("GET /api/v1/me/plans", s.requireUser(s.listAvailablePlans))
 	mux.HandleFunc("GET /api/v1/plans", s.listAvailablePlans)
 	mux.HandleFunc("GET /api/v1/me/devices", s.requireUser(s.listMyDevices))
@@ -247,6 +248,14 @@ func (s *server) userLogin(w http.ResponseWriter, r *http.Request) {
 	s.issueSession(w, r, actor{id: id, kind: "user"})
 }
 
+// Website sessions coexist with the native client and admin console cookies.
+func sessionNames(r *http.Request, kind string) (string, string) {
+	if kind == "user" && r.Header.Get("X-26x-Portal") == "1" {
+		return "26x_member_session", "26x_member_csrf"
+	}
+	return sessionCookie, csrfCookie
+}
+
 func (s *server) issueSession(w http.ResponseWriter, r *http.Request, current actor) {
 	token, err := randomToken(32)
 	if err != nil {
@@ -267,8 +276,9 @@ func (s *server) issueSession(w http.ResponseWriter, r *http.Request, current ac
 		writeError(w, http.StatusInternalServerError, "internal_error", "Unable to create a session")
 		return
 	}
-	http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: token, Path: "/", Expires: expires, MaxAge: 12 * 60 * 60, HttpOnly: true, Secure: s.cfg.cookieSecure, SameSite: http.SameSiteLaxMode})
-	http.SetCookie(w, &http.Cookie{Name: csrfCookie, Value: csrf, Path: "/", Expires: expires, MaxAge: 12 * 60 * 60, Secure: s.cfg.cookieSecure, SameSite: http.SameSiteLaxMode})
+	sessionName, csrfName := sessionNames(r, current.kind)
+	http.SetCookie(w, &http.Cookie{Name: sessionName, Value: token, Path: "/", Expires: expires, MaxAge: 12 * 60 * 60, HttpOnly: true, Secure: s.cfg.cookieSecure, SameSite: http.SameSiteLaxMode})
+	http.SetCookie(w, &http.Cookie{Name: csrfName, Value: csrf, Path: "/", Expires: expires, MaxAge: 12 * 60 * 60, Secure: s.cfg.cookieSecure, SameSite: http.SameSiteLaxMode})
 	writeJSON(w, http.StatusCreated, map[string]any{"role": current.role, "expiresAt": expires.Format(time.RFC3339)})
 }
 
@@ -308,7 +318,8 @@ func (s *server) requireUser(next http.HandlerFunc) http.HandlerFunc {
 }
 
 func (s *server) authenticate(r *http.Request, kind string) (actor, error) {
-	cookie, err := r.Cookie(sessionCookie)
+	name, _ := sessionNames(r, kind)
+	cookie, err := r.Cookie(name)
 	if err != nil || cookie.Value == "" {
 		return actor{}, errors.New("missing session")
 	}
@@ -352,7 +363,8 @@ func (s *server) withUserCSRF(next http.HandlerFunc) http.HandlerFunc {
 			writeError(w, http.StatusUnauthorized, "sign_in_required", "Sign in to your 26x account")
 			return
 		}
-		csrf, err := r.Cookie(csrfCookie)
+		_, name := sessionNames(r, "user")
+		csrf, err := r.Cookie(name)
 		if err != nil || subtle.ConstantTimeCompare([]byte(csrf.Value), []byte(current.csrf)) != 1 || subtle.ConstantTimeCompare([]byte(r.Header.Get("X-CSRF-Token")), []byte(current.csrf)) != 1 {
 			writeError(w, http.StatusForbidden, "csrf_check_failed", "Refresh the client session and try again")
 			return
@@ -364,12 +376,13 @@ func (s *server) withUserCSRF(next http.HandlerFunc) http.HandlerFunc {
 
 func (s *server) logout(w http.ResponseWriter, r *http.Request) {
 	current := actorFromContext(r)
-	if cookie, err := r.Cookie(sessionCookie); err == nil {
+	sessionName, csrfName := sessionNames(r, current.kind)
+	if cookie, err := r.Cookie(sessionName); err == nil {
 		hash := sha256.Sum256([]byte(cookie.Value))
 		_, _ = s.db.ExecContext(r.Context(), "UPDATE sessions SET revoked_at = now() WHERE token_hash = $1 AND actor_id = $2", hash[:], current.id)
 	}
-	clearCookie(w, sessionCookie, true, s.cfg.cookieSecure)
-	clearCookie(w, csrfCookie, false, s.cfg.cookieSecure)
+	clearCookie(w, sessionName, true, s.cfg.cookieSecure)
+	clearCookie(w, csrfName, false, s.cfg.cookieSecure)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -388,17 +401,15 @@ func (s *server) userMe(w http.ResponseWriter, r *http.Request) {
 	var email, status string
 	var planName, planTier, trialCode sql.NullString
 	var endsAt sql.NullTime
-	err := s.db.QueryRowContext(r.Context(), `SELECT u.email::text, u.status,
-		(SELECT p.name FROM subscriptions sub JOIN plans p ON p.id = sub.plan_id
-		 WHERE sub.user_id = u.id AND sub.status = 'active' AND sub.starts_at <= now()
-		 AND (sub.ends_at IS NULL OR sub.ends_at > now()) ORDER BY sub.ends_at DESC NULLS FIRST LIMIT 1),
-		(SELECT p.tier FROM subscriptions sub JOIN plans p ON p.id = sub.plan_id
-		 WHERE sub.user_id = u.id AND sub.status = 'active' AND sub.starts_at <= now()
-		 AND (sub.ends_at IS NULL OR sub.ends_at > now()) ORDER BY sub.ends_at DESC NULLS FIRST LIMIT 1),
-		(SELECT ends_at FROM subscriptions WHERE user_id = u.id AND status = 'active' AND starts_at <= now()
-		 AND (ends_at IS NULL OR ends_at > now()) ORDER BY ends_at DESC NULLS FIRST LIMIT 1)
-		,(SELECT code FROM trial_accounts t WHERE t.user_id=u.id)
-		FROM users u WHERE u.id = $1`, current.id).Scan(&email, &status, &planName, &planTier, &endsAt, &trialCode)
+	err := s.db.QueryRowContext(r.Context(), `SELECT u.email::text, u.status, current.name, current.tier,
+		(SELECT upper(period) FROM unnest((SELECT range_agg(tstzrange(starts_at,ends_at,'[)'))
+		 FROM subscriptions WHERE user_id=u.id AND status='active' AND starts_at IS NOT NULL)) AS period WHERE period @> now()),
+		(SELECT code FROM trial_accounts WHERE user_id=u.id)
+		FROM users u LEFT JOIN LATERAL (
+		 SELECT p.name, p.tier FROM subscriptions sub JOIN plans p ON p.id=sub.plan_id
+		 WHERE sub.user_id=u.id AND sub.status='active' AND sub.starts_at<=now()
+		 AND (sub.ends_at IS NULL OR sub.ends_at>now()) ORDER BY sub.ends_at DESC NULLS FIRST LIMIT 1
+		) current ON true WHERE u.id=$1`, current.id).Scan(&email, &status, &planName, &planTier, &endsAt, &trialCode)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Unable to read account")
 		return

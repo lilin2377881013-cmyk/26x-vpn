@@ -113,6 +113,9 @@ func cashierHeaders(w http.ResponseWriter) {
 }
 func (s *server) cashierPage(w http.ResponseWriter, r *http.Request) {
 	cashierHeaders(w)
+	// Allow browsers to identify same-origin form submissions without exposing
+	// the bearer token in the referrer path.
+	w.Header().Set("Referrer-Policy", "strict-origin")
 	// Form navigations may redirect to the existing external Alipay cashier.
 	// Keep POST targets local in the template, and allow its HTTPS redirects
 	// plus the one explicitly configured legacy HTTP gateway origin.

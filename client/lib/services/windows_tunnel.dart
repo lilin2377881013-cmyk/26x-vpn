@@ -69,7 +69,19 @@ class WindowsTunnel {
             }
           },
           onError: (_) => complete(const {'code': 'tunnel_start_failed'}),
-          onDone: () => complete(const {'code': 'tunnel_start_failed'}),
+          onDone: () async {
+            if (started.isCompleted) return;
+            final exit = await process.exitCode;
+            complete({
+              'code': switch (exit) {
+                2 => 'worker_exit_2',
+                70 => 'worker_cleanup_timeout',
+                71 => 'worker_dns_rollback_timeout',
+                72 => 'worker_data_rollback_timeout',
+                _ => 'tunnel_start_failed',
+              },
+            });
+          },
         );
     unawaited(process.stderr.drain<void>());
     unawaited(

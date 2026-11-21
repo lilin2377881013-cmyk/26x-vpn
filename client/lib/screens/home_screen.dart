@@ -40,6 +40,7 @@ class _HomeScreenState extends State<HomeScreen> {
   VpnNode? _selectedNode;
   TunnelSnapshot _tunnelState = const TunnelSnapshot(TunnelState.disconnected);
   bool _busy = false;
+  bool _sessionUnresolved = true;
   int _tab = 0;
   String _planTier = 'standard';
   final _selectedPlanCodes = <String, String>{};
@@ -69,24 +70,32 @@ class _HomeScreenState extends State<HomeScreen> {
     });
     unawaited(widget.tunnel.initialize());
     _busy = true;
-    unawaited(_restoreSession());
     unawaited(_loadPlans());
-    unawaited(_identifyInstallation().catchError((Object _) {}));
+    unawaited(_restoreOnStartup());
   }
 
-  Future<void> _restoreSession() async {
+  Future<void> _restoreOnStartup() async {
     try {
-      if (await widget.api.restoreSession()) {
-        final restored = widget.api.account;
-        if (restored?.trialCode == null && restored != null) {
-          _account = restored;
-          await _loadDevices();
-        }
+      await _restoreAccount();
+      if (mounted && !_hasMembership) {
+        unawaited(_identifyInstallation().catchError((Object _) {}));
       }
     } catch (error) {
       _message = error.toString();
     } finally {
       if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _restoreAccount() async {
+    final restored = await widget.api.restoreSession()
+        ? widget.api.account
+        : null;
+    if (!mounted) return;
+    _sessionUnresolved = false;
+    if (restored != null && restored.trialCode == null) {
+      _account = restored;
+      await _loadDevices();
     }
   }
 
@@ -227,6 +236,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _checkout(VpnPlan plan) async {
+    if (_sessionUnresolved) return _refresh();
     if (_account == null) {
       _requestAuthentication(purchasing: true);
       return;
@@ -364,6 +374,7 @@ class _HomeScreenState extends State<HomeScreen> {
           _selectedNode = null;
           _message = signOutError;
         });
+        unawaited(_identifyInstallation().catchError((Object _) {}));
       }
     }
   }
@@ -907,7 +918,13 @@ class _HomeScreenState extends State<HomeScreen> {
                   borderRadius: BorderRadius.circular(14),
                 ),
               ),
-              child: Text(_busy ? '请稍候…' : '开通会员'),
+              child: Text(
+                _sessionUnresolved
+                    ? _restoreLabel
+                    : _busy
+                    ? '请稍候…'
+                    : '开通会员',
+              ),
             ),
           ),
           if (_account != null)
@@ -1056,7 +1073,15 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  String get _restoreLabel => _busy ? '正在恢复账号…' : '重试恢复账号';
+
   Widget _accountCard() {
+    if (_sessionUnresolved) {
+      return TextButton(
+        onPressed: _busy ? null : _refresh,
+        child: Text(_restoreLabel),
+      );
+    }
     final account = _account;
     final endsAt = account?.subscriptionEndsAt;
     return Column(
@@ -1359,14 +1384,14 @@ class _HomeScreenState extends State<HomeScreen> {
                                 ? status
                                 : _isConnected
                                 ? '断开连接'
+                                : _sessionUnresolved
+                                ? _restoreLabel
                                 : !_hasMembership && !isTrial
                                 ? (_trialExpired
                                       ? '开通会员'
-                                      : (_trialEndsAt == null
-                                            ? (_trialEndsAt == null
-                                                  ? '免费试用'
-                                                  : '继续试用')
-                                            : '继续试用'))
+                                      : _trialEndsAt == null
+                                      ? '免费试用'
+                                      : '继续试用')
                                 : '连接 VPN',
                           ),
                         ],
@@ -1552,6 +1577,7 @@ class _HomeScreenState extends State<HomeScreen> {
       }
       return;
     }
+    if (_sessionUnresolved) return _refresh();
     if (!_hasMembership && !_usingTrial) {
       if (_trialExpired) {
         if (_account == null) {
@@ -1795,8 +1821,13 @@ class _HomeScreenState extends State<HomeScreen> {
     });
     try {
       if (_account == null) {
-        await widget.tunnel.initialize();
-        await Future.wait([_identifyInstallation(), _loadPlans()]);
+        if (_sessionUnresolved) await _restoreAccount();
+        if (!mounted) return;
+        await Future.wait([
+          if (_account == null) widget.tunnel.initialize(),
+          if (!_hasMembership) _identifyInstallation(),
+          _loadPlans(),
+        ]);
       } else {
         final hadMembership = _hasMembership;
         _account = await widget.api.loadAccount();

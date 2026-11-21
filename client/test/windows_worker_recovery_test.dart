@@ -17,6 +17,7 @@ import 'dart:io';
 Future<void> main() async {
   var hang = false;
   await for (final line in stdin.transform(utf8.decoder).transform(const LineSplitter())) {
+    if (line.startsWith('exit=')) exit(int.parse(line.substring(5)));
     hang = line == 'hang';
     stdout.writeln('connected');
   }
@@ -39,12 +40,20 @@ Future<void> main() async {
       addTearDown(() async {
         await tunnel.disconnect();
       });
+      for (final (exitCode, reason) in [
+        (2, 'worker_exit_2'),
+        (70, 'worker_cleanup_timeout'),
+        (71, 'worker_dns_rollback_timeout'),
+        (72, 'worker_data_rollback_timeout'),
+      ]) {
+        expect((await tunnel.connect('exit=$exitCode'))['code'], reason);
+      }
       final launch = tunnel.connect('normal');
       expect((await tunnel.connect('duplicate'))['code'], 'tunnel_busy');
       final cancel = tunnel.disconnect();
       await launch;
       expect((await cancel)['state'], 'disconnected');
-      expect(await children.single.exitCode, isA<int>());
+      expect(await children.last.exitCode, isA<int>());
       expect((await tunnel.connect('hang'))['state'], 'connected');
       final stopped = await Future.wait([
         tunnel.disconnect(),

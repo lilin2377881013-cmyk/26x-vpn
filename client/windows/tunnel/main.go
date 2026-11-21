@@ -31,6 +31,14 @@ func main() {
 
 const tunnelDNS = "10.26.0.2"
 
+// Reserved worker exit codes let the UI identify a watchdog exit even if the
+// core cannot finish shutting down or flush its ordinary error response.
+const (
+	exitCleanupTimeout      = 70
+	exitDNSRollbackTimeout  = 71
+	exitDataRollbackTimeout = 72
+)
+
 var errNodeDNS = errors.New("node address lookup failed")
 
 func run() string {
@@ -71,7 +79,7 @@ func run() string {
 		cancel()
 		// Also works when Flutter crashes and graceful shutdown stalls. Production
 		// profiles only configure the process-owned Wintun adapter and WFP session.
-		time.AfterFunc(10*time.Second, func() { os.Exit(2) })
+		time.AfterFunc(10*time.Second, func() { os.Exit(exitCleanupTimeout) })
 	}()
 	config, err := configure(ctx, raw, string(assets))
 	if errors.Is(err, errNodeDNS) {
@@ -106,7 +114,16 @@ func run() string {
 	}
 	// The client closes its pipe on disconnect. Bound cleanup on a failed
 	// startup too, even if the parent is still waiting for our result.
-	watchdog := time.AfterFunc(10*time.Second, func() { os.Exit(2) })
+	watchdog := time.AfterFunc(10*time.Second, func() {
+		switch result {
+		case "tunnel_dns_failed":
+			os.Exit(exitDNSRollbackTimeout)
+		case "tunnel_data_failed":
+			os.Exit(exitDataRollbackTimeout)
+		default:
+			os.Exit(exitCleanupTimeout)
+		}
+	})
 	defer watchdog.Stop()
 	if err := xray.StopXray(); err != nil {
 		return "tunnel_stop_failed"

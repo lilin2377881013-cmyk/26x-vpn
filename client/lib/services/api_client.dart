@@ -136,6 +136,7 @@ class ApiClient {
     final result = await _request(
       'POST',
       '/api/v1/auth/trial',
+      stage: '读取游客识别码 [API-TRIAL-ID]',
       body: {
         'installation': await _trialInstallation(),
         'platform': platform,
@@ -219,7 +220,7 @@ class ApiClient {
     _cookies['26x_session'] = token;
     _cookies['26x_csrf'] = csrf;
     try {
-      await loadAccount();
+      await loadAccount(stage: '恢复账号 [API-SESSION-RESTORE]');
       return true;
     } on ApiException catch (error) {
       if (error.statusCode == HttpStatus.unauthorized) {
@@ -230,8 +231,8 @@ class ApiClient {
     }
   }
 
-  Future<Account> loadAccount() async {
-    final result = await _request('GET', '/api/v1/me');
+  Future<Account> loadAccount({String? stage}) async {
+    final result = await _request('GET', '/api/v1/me', stage: stage);
     if (result.statusCode != HttpStatus.ok) {
       throw ApiException(
         _errorMessage(result.body, '无法读取账户信息'),
@@ -528,22 +529,28 @@ class ApiClient {
     String path, {
     bool csrf = false,
     Object? body,
+    String? stage,
   }) async {
     final uri = _baseUri.resolve(path);
+    final requestStage = stage ?? apiRequestStage(method, uri.path);
     if (uri.scheme != 'https' &&
         !{'localhost', '127.0.0.1', '::1'}.contains(uri.host)) {
       throw const ApiException('账户连接必须使用 HTTPS');
     }
     try {
-      return await _sendRequest(method, uri, csrf: csrf, body: body);
-    } on HandshakeException {
-      throw ApiException(
-        '${apiRequestStage(method, uri.path)}安全连接校验失败，请检查系统时间或联系支持。',
+      return await _sendRequest(
+        method,
+        uri,
+        csrf: csrf,
+        body: body,
+        stage: requestStage,
       );
+    } on HandshakeException {
+      throw ApiException('$requestStage安全连接校验失败，请检查系统时间或联系支持。');
     } on HttpException {
-      throw ApiException('${apiRequestStage(method, uri.path)}连接中断，请重试。');
+      throw ApiException('$requestStage连接中断，请重试。');
     } on SocketException {
-      throw ApiException('${apiRequestStage(method, uri.path)}无法连接，请检查网络后重试。');
+      throw ApiException('$requestStage无法连接，请检查网络后重试。');
     }
   }
 
@@ -552,6 +559,7 @@ class ApiClient {
     Uri uri, {
     required bool csrf,
     required Object? body,
+    required String stage,
   }) async {
     HttpClientRequest? activeRequest;
     var timedOut = false;
@@ -592,7 +600,7 @@ class ApiClient {
       onTimeout: () {
         timedOut = true;
         activeRequest?.abort();
-        throw ApiException('${apiRequestStage(method, uri.path)}请求超时，请重试。');
+        throw ApiException('$stage请求超时，请重试。');
       },
     );
   }

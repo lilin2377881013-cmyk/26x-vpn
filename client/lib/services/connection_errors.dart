@@ -11,7 +11,11 @@ String apiRequestStage(String method, String path) {
   }
   if (path.endsWith('/credentials')) return '节点配置 [API-CONFIG]';
   if (path.contains('/checkout')) return '会员下单 [API-PAYMENT]';
-  if (path.contains('/auth/')) return '账号登录 [API-AUTH]';
+  if (path == '/api/v1/auth/session') {
+    return method == 'DELETE' ? '退出账号 [API-SIGNOUT]' : '账号登录 [API-AUTH]';
+  }
+  if (path == '/api/v1/auth/register') return '注册账号 [API-REGISTER]';
+  if (path == '/api/v1/auth/trial') return '启动试用 [API-TRIAL-START]';
   if (path.endsWith('/devices')) return '登录设备 [API-DEVICES]';
   return '账号服务 [API-ACCOUNT]';
 }
@@ -36,6 +40,12 @@ String tunnelErrorMessage(String code, {bool windows = false}) =>
       'tunnel_routes_failed' => '系统路由 [VPN-ROUTES]：系统未能配置 VPN 路由。',
       'tunnel_core_failed' => '核心启动 [VPN-CORE]：VPN 核心启动失败。',
       'tunnel_start_timeout' => '隧道启动 [VPN-START-TIMEOUT]：启动超时，已取消，请重新连接。',
+      'worker_exit_2' => '隧道进程 [VPN-WORKER-EXIT-2]：启动时意外退出，退出码 2。',
+      'worker_cleanup_timeout' => '隧道清理 [VPN-CLEANUP-TIMEOUT]：关闭过程超时，隧道进程已退出。',
+      'worker_dns_rollback_timeout' =>
+        '隧道 DNS [VPN-DNS-ROLLBACK]：DNS 检查失败，清理超时后隧道进程已退出。',
+      'worker_data_rollback_timeout' =>
+        '隧道传输 [VPN-DATA-ROLLBACK]：HTTPS 检查失败，清理超时后隧道进程已退出。',
       'tunnel_start_failed' => '隧道启动 [VPN-START]：系统未能启动 VPN 隧道。',
       'tunnel_stop_failed' => '隧道断开 [VPN-STOP]：系统未能正常断开 VPN。',
       'tunnel_stop_timeout' => '隧道断开 [VPN-STOP-TIMEOUT]：断开超时，请检查系统 VPN 状态。',

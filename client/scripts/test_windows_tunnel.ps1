@@ -13,6 +13,20 @@ if ($Scenario -eq 'Blocked') {
     $config.routing.rules[0].outboundTag = 'block'
 }
 if ($Scenario -eq 'NoDns') { $config.outbounds[0].settings.port = 25438 }
+function Wait-WorkerReply($Process, [string]$Expected, [int]$TimeoutMs) {
+    $clock = [Diagnostics.Stopwatch]::StartNew()
+    while ($true) {
+        $remaining = [int]($TimeoutMs - $clock.ElapsedMilliseconds)
+        $line = $Process.StandardOutput.ReadLineAsync()
+        if ($remaining -le 0 -or -not $line.Wait($remaining)) { throw "Worker timed out waiting for $Expected" }
+        $value = $line.Result
+        if ($value -ceq $Expected) { return }
+        if ($null -eq $value) { throw "Worker exited before $Expected" }
+        # Ignore core log lines in the same way as the Flutter supervisor.
+        if ($value -cmatch '^[a-z][a-z0-9_]+$') { throw "Worker reported $value while waiting for $Expected" }
+    }
+}
+
 function Get-UplinkDns {
     $routes = Get-NetRoute -AddressFamily IPv4 -DestinationPrefix '0.0.0.0/0'
     return @($routes | Sort-Object InterfaceIndex -Unique | ForEach-Object {
@@ -39,22 +53,12 @@ try {
     $diagnostics = $worker.StandardError.ReadToEndAsync()
     $worker.StandardInput.WriteLine(($config | ConvertTo-Json -Depth 12 -Compress))
     $worker.StandardInput.Flush()
-    $deadline = [DateTime]::UtcNow.AddSeconds(55)
-    while ($true) {
-        $remaining = [int]($deadline - [DateTime]::UtcNow).TotalMilliseconds
-        $ready = $worker.StandardOutput.ReadLineAsync()
-        if ($remaining -le 0 -or -not $ready.Wait($remaining)) { throw 'Windows TUN startup timed out' }
-        $line = $ready.Result
-        if ($Scenario -eq 'Blocked' -and $line -eq 'tunnel_data_failed') { break }
-        if ($Scenario -eq 'NoDns' -and $line -eq 'tunnel_dns_failed') { break }
-        if ($line -eq 'connected') {
-            if ($Scenario -eq 'NoDns') { throw 'Worker reported connected despite blocked DNS' }
-            if ($Scenario -eq 'Blocked') { throw 'Worker reported connected despite blocked HTTPS' }
-            break
-        }
-        if ($null -eq $line -or $line -in @('vpn_permission_denied', 'engine_unavailable', 'profile_invalid', 'node_unreachable', 'tunnel_start_failed')) { throw "Windows TUN failed: $line" }
-        Write-Host "Worker startup: $line"
+    $expected = switch ($Scenario) {
+        'Blocked' { 'tunnel_data_failed' }
+        'NoDns'   { 'tunnel_dns_failed' }
+        default   { 'connected' }
     }
+    Wait-WorkerReply $worker $expected 55000
     $tailOutput = $worker.StandardOutput.ReadToEndAsync()
     if ($Scenario -in @('Blocked', 'NoDns')) {
         if (-not $worker.WaitForExit(12000) -or $worker.ExitCode -ne 1) { throw 'Broken data path did not roll back' }
@@ -69,8 +73,7 @@ try {
         $config.outbounds[0].settings.port = 25437
         $worker.StandardInput.WriteLine(($config | ConvertTo-Json -Depth 12 -Compress))
         $worker.StandardInput.Flush()
-        $ready = $worker.StandardOutput.ReadLineAsync()
-        if (-not $ready.Wait(42000) -or $ready.Result -ne 'connected') { throw 'Immediate switch to the second endpoint failed' }
+        Wait-WorkerReply $worker 'connected' 42000
         $tailOutput = $worker.StandardOutput.ReadToEndAsync()
     } elseif ($Scenario -eq 'Crash') {
         $worker.Kill()

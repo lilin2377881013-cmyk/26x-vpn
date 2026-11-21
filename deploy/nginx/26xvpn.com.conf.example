@@ -1,3 +1,10 @@
+# Forward the origin-only policy requested by the cashier.
+# Every other upstream receives the default protection.
+map $upstream_http_referrer_policy $member_referrer_policy {
+    default "no-referrer";
+    "strict-origin" "strict-origin";
+}
+
 # Install the real certificate paths before enabling the HTTPS server block.
 # This forwards website requests to Next.js and same-origin /api requests to Go.
 # The API stays bound to localhost; PostgreSQL is never exposed by Nginx.
@@ -36,7 +43,8 @@ server {
 
     add_header Strict-Transport-Security "max-age=31536000" always;
     add_header X-Content-Type-Options "nosniff" always;
-    add_header Referrer-Policy "no-referrer" always;
+    proxy_hide_header Referrer-Policy;
+    add_header Referrer-Policy $member_referrer_policy always;
     client_max_body_size 2m;
 
     # Admin MFA is not implemented. Replace the reserved address with the

@@ -200,11 +200,6 @@ func configure(ctx context.Context, raw []byte, directCIDRs string) (string, err
 		if !ok || outbound["tag"] != "26x-proxy" {
 			continue
 		}
-		if outbound["protocol"] == "freedom" {
-			// The installer smoke test has a direct outbound with no fixed peer.
-			settings["autoOutboundsInterface"] = "auto"
-			break
-		}
 		peer, _ := outbound["settings"].(map[string]any)
 		host, _ := peer["address"].(string)
 		if host == "" {
@@ -232,6 +227,9 @@ func configure(ctx context.Context, raw []byte, directCIDRs string) (string, err
 		// this exact peer even on a hotspot, Ethernet + Wi-Fi, or after roaming.
 		delete(settings, "autoOutboundsInterface")
 		break
+	}
+	if !endpoint.IsValid() {
+		return "", errors.New("missing transport peer")
 	}
 	routes, err := tunnelRoutes(directCIDRs, endpoint)
 	if err != nil {
@@ -283,9 +281,7 @@ func tunnelRoutes(directCIDRs string, endpoint netip.Addr) ([]string, error) {
 		}
 		capture.RemovePrefix(prefix)
 	}
-	if endpoint.IsValid() {
-		capture.Remove(endpoint.Unmap())
-	}
+	capture.Remove(endpoint.Unmap())
 	set, err := capture.IPSet()
 	if err != nil {
 		return nil, err

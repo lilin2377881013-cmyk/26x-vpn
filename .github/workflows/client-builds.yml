@@ -38,6 +38,7 @@ jobs:
           echo '07c256185d6ee3652e09fa55c0b673e2624b565e02c4b9091c79ca7d2f24ef51  wintun.zip' | sha256sum --check
           unzip -q wintun.zip
           bash client/scripts/build_windows_tunnel.sh amd64 wintun/bin/amd64/wintun.dll
+          (cd work/libXray-v26.11.9 && go build -mod=readonly -trimpath -o ../26x-test-relay.exe github.com/xtls/xray-core/main)
       - name: Build Windows client
         working-directory: client
         run: flutter build windows --release --build-name=0.1.9 --build-number=25 --dart-define=API_BASE_URL=https://26xvpn.com

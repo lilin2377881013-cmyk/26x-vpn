@@ -22,8 +22,32 @@ try {
     $test = Start-Process -FilePath (Join-Path $directory '26x-tunnel.exe') -PassThru -Wait -NoNewWindow -RedirectStandardInput (Join-Path $PSScriptRoot 'invalid-profile.json') -RedirectStandardOutput (Join-Path $env:RUNNER_TEMP '26x-worker-result.txt')
     $reply = (Get-Content (Join-Path $env:RUNNER_TEMP '26x-worker-result.txt') -Raw).Trim()
     if ($test.ExitCode -ne 1 -or $reply -ne 'profile_invalid') { throw "Unexpected worker response: $reply" }
-    foreach ($scenario in @('Blocked', 'Crash', 'Healthy')) {
-        & (Join-Path $PSScriptRoot 'test_windows_tunnel.ps1') -Directory $directory -Scenario $scenario
+    # The relay stands in for a remote node. Only its outbound uses the runner's
+    # uplink, so all client DNS and HTTPS traffic exercises the installed TUN.
+    $uplink = (Find-NetRoute -RemoteIPAddress '1.1.1.1' | Select-Object -First 1).InterfaceAlias
+    if (-not $uplink) { throw 'Unable to identify the test uplink' }
+    $peerId = [guid]::NewGuid()
+    $relayConfig = @{
+        inbounds = @(@{ listen = '127.0.0.1'; port = 25436; protocol = 'vless'; settings = @{ clients = @(@{ id = $peerId.ToString() }); decryption = 'none' } })
+        outbounds = @(@{ protocol = 'freedom'; settings = @{ domainStrategy = 'UseIPv4' }; streamSettings = @{ sockopt = @{ interface = $uplink } } })
+    }
+    $configPath = Join-Path $env:RUNNER_TEMP '26x-relay.json'
+    $relayConfig | ConvertTo-Json -Depth 10 | Set-Content -Encoding utf8NoBOM $configPath
+    $relayPath = Join-Path $env:GITHUB_WORKSPACE 'work/26x-test-relay.exe'
+    $relay = Start-Process $relayPath -ArgumentList @('run','-c',('"' + $configPath + '"')) -PassThru -NoNewWindow
+    try {
+        for ($i = 0; $i -lt 40; $i++) {
+            if ($relay.HasExited) { throw 'Loopback test node exited' }
+            if (Get-NetTCPConnection -LocalPort 25436 -State Listen -ErrorAction SilentlyContinue | Where-Object OwningProcess -eq $relay.Id) { break }
+            Start-Sleep -Milliseconds 250
+        }
+        foreach ($scenario in @('Blocked', 'Crash', 'Healthy')) {
+            & (Join-Path $PSScriptRoot 'test_windows_tunnel.ps1') -Directory $directory -PeerId $peerId -Scenario $scenario
+        }
+    } finally {
+        if (-not $relay.HasExited) { $relay.Kill(); $relay.WaitForExit() }
+        $relay.Dispose()
+        Remove-Item $configPath
     }
     $signature = Get-AuthenticodeSignature $installer
     $report = [ordered]@{ version = '0.1.9'; build = 25; installation = 'passed'; runtimeAssets = 'passed'; workerInputValidation = 'passed'; postTunnelFailureRollback = 'passed'; forcedExitRecovery = 'passed'; nativeTunnelDnsAndRouteCleanup = 'passed'; authenticodeStatus = $signature.Status.ToString(); sha256 = (Get-FileHash $installer -Algorithm SHA256).Hash.ToLower() }

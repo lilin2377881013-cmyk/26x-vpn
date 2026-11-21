@@ -1,11 +1,10 @@
-param([Parameter(Mandatory = $true)][string]$Directory, [ValidateSet('Healthy','Blocked','Crash')][string]$Scenario = 'Healthy')
+param([Parameter(Mandatory = $true)][string]$Directory, [Parameter(Mandatory = $true)][guid]$PeerId, [ValidateSet('Healthy','Blocked','Crash')][string]$Scenario = 'Healthy')
 $ErrorActionPreference = 'Stop'
 
-# Exercise the installed Wintun worker on the disposable build host. A direct
-# outbound isolates OS routing/DNS from production nodes and needs no secrets.
+# Connect the installed worker to a loopback-only test node through VLESS.
 $config = @{
     inbounds = @(@{ tag = '26x-tun'; port = 0; protocol = 'tun'; settings = @{ name = '26x-tun'; desc = '26x VPN'; mtu = 1500; gateway = @('10.26.0.1/30', 'fd26:26::1/126') } })
-    outbounds = @(@{ tag = '26x-proxy'; protocol = 'freedom' }, @{ tag = 'block'; protocol = 'blackhole' })
+    outbounds = @(@{ tag = '26x-proxy'; protocol = 'vless'; settings = @{ address = '127.0.0.1'; port = 25436; id = $PeerId.ToString(); encryption = 'none' } }, @{ tag = 'block'; protocol = 'blackhole' })
     routing = @{ domainStrategy = 'AsIs'; rules = @(@{ type = 'field'; inboundTag = @('26x-tun'); outboundTag = '26x-proxy' }) }
 }
 if ($Scenario -eq 'Blocked') {

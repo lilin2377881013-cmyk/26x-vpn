@@ -29,6 +29,9 @@ output="${client_dir}/windows/runtime"
 mkdir -p "${output}"
 (
   cd "${source_dir}"
+  if [[ "$(go env GOHOSTOS)/$(go env GOHOSTARCH)" == "windows/$1" ]]; then
+    go test -mod=readonly "${client_dir}/windows/tunnel/main.go" "${client_dir}/windows/tunnel/main_test.go"
+  fi
   CGO_ENABLED=0 GOOS=windows GOARCH="$1" go build -mod=readonly -trimpath \
     -o "${output}/26x-tunnel.exe" "${client_dir}/windows/tunnel/main.go"
 )

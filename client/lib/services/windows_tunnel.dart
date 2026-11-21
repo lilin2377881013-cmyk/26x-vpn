@@ -7,31 +7,32 @@ class WindowsTunnel {
   WindowsTunnel({required this.onState});
 
   final void Function(Map<String, String>) onState;
+  Future<Process>? _launch;
   Process? _process;
-  Future<int>? _exit;
-  bool _stopping = false;
+  Future<Map<String, String>>? _stopping;
   Map<String, String> status = const {'state': 'disconnected'};
 
   Future<Map<String, String>> connect(String config) async {
-    if (_process != null) return const {'code': 'tunnel_busy'};
+    if (_launch != null || _process != null || _stopping != null) {
+      return const {'code': 'tunnel_busy'};
+    }
     final runtime = File(Platform.resolvedExecutable).parent;
     final engine = File('${runtime.path}\\26x-tunnel.exe');
-    if (!await engine.exists()) return const {'code': 'engine_unavailable'};
-
-    Process process;
+    final launch = _launch = Process.start(
+      engine.path,
+      const [],
+      workingDirectory: runtime.path,
+    );
+    late final Process process;
     try {
-      process = await Process.start(
-        engine.path,
-        const [],
-        workingDirectory: runtime.path,
-      );
+      process = await launch;
+      _process = process;
     } on ProcessException {
       return const {'code': 'engine_unavailable'};
+    } finally {
+      _launch = null;
     }
 
-    _process = process;
-    _exit = process.exitCode;
-    _stopping = false;
     final started = Completer<Map<String, String>>();
     void complete(Map<String, String> reply) {
       if (!started.isCompleted) started.complete(reply);
@@ -49,9 +50,14 @@ class WindowsTunnel {
               'engine_unavailable',
               'profile_invalid',
               'node_unreachable',
+              'node_dns_failed',
+              'tunnel_busy',
+              'tunnel_dns_failed',
+              'tunnel_data_failed',
               'probe_execution_failed',
               'tunnel_core_failed',
               'tunnel_start_failed',
+              'tunnel_stop_failed',
             }.contains(line)) {
               complete({'code': line});
             }
@@ -61,52 +67,75 @@ class WindowsTunnel {
         );
     unawaited(process.stderr.drain<void>());
     unawaited(
-      process.exitCode.then((exitCode) {
+      process.exitCode.then((_) {
         if (_process != process) return;
         _process = null;
-        _exit = null;
-        if (status['state'] == 'connected' || _stopping) {
-          _publish({
-            'state': _stopping && exitCode == 0 ? 'disconnected' : 'error',
-          });
+        if (_stopping == null && status['state'] == 'connected') {
+          _publish(const {'state': 'error', 'code': 'tunnel_data_failed'});
         }
       }),
     );
 
-    process.stdin.writeln(config);
+    var failure = 'tunnel_start_failed';
     try {
-      await process.stdin.flush();
-      final reply = await started.future.timeout(const Duration(seconds: 35));
-      if (reply['state'] == 'connected' && _process == process) {
-        _publish(reply);
-        return reply;
+      process.stdin.writeln(config);
+      await process.stdin.flush().timeout(const Duration(seconds: 3));
+      final reply = await started.future.timeout(const Duration(seconds: 42));
+      if (reply['state'] == 'connected' &&
+          _process == process &&
+          _stopping == null) {
+        return _publish(reply);
       }
-      await disconnect();
-      return {'code': reply['code'] ?? 'tunnel_start_failed'};
-    } catch (_) {
-      await disconnect();
-      return const {'code': 'tunnel_start_failed'};
+      failure = reply['code'] ?? failure;
+    } on TimeoutException {
+      failure = 'tunnel_start_timeout';
+    } on IOException {
+      // The worker has stopped reading its input.
+    } on StateError {
+      // A concurrent disconnect already closed stdin.
     }
+    if (_process == process) {
+      final stopped = await disconnect();
+      if (stopped['state'] == 'error') return stopped;
+    }
+    return {'code': failure};
   }
 
-  Future<Map<String, String>> disconnect() async {
+  Future<Map<String, String>> disconnect() =>
+      _stopping ??= _stop().whenComplete(() => _stopping = null);
+
+  Future<Map<String, String>> _stop() async {
+    final launch = _launch;
+    if (launch != null) {
+      try {
+        await launch;
+      } on ProcessException {
+        return _publish(const {'state': 'disconnected'});
+      }
+    }
     final process = _process;
-    final exit = _exit;
-    if (process == null || exit == null) {
-      return _publish(const {'state': 'disconnected'});
-    }
-    _stopping = true;
+    if (process == null) return _publish(const {'state': 'disconnected'});
     try {
-      await process.stdin.close();
-    } on IOException {
-      // The worker may have closed its stdin as it exited.
-    }
-    try {
-      final code = await exit.timeout(const Duration(seconds: 12));
-      return _publish({'state': code == 0 ? 'disconnected' : 'error'});
+      try {
+        await process.stdin.close().timeout(const Duration(seconds: 2));
+      } on IOException {
+        // The worker may already be exiting.
+      }
+      await process.exitCode.timeout(const Duration(seconds: 11));
     } on TimeoutException {
-      return _publish(const {'state': 'error'});
+      // Terminate only this app's tracked worker. Wintun and its dynamic
+      // filtering session belong to that process.
+      process.kill();
+      try {
+        await process.exitCode.timeout(const Duration(seconds: 3));
+      } on TimeoutException {
+        return _publish(const {
+          'state': 'error',
+          'code': 'tunnel_stop_timeout',
+        });
+      }
     }
+    return _publish(const {'state': 'disconnected'});
   }
 
   Map<String, String> _publish(Map<String, String> snapshot) {

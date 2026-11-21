@@ -1,5 +1,5 @@
 $ErrorActionPreference = 'Stop'
-$installer = Join-Path $PSScriptRoot '..\windows\26x-VPN-0.1.8-Setup-x64.exe'
+$installer = Join-Path $PSScriptRoot '..\windows\26x-VPN-0.1.9-Setup-x64.exe'
 $directory = Join-Path $env:ProgramFiles '26x VPN'
 $registry = 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\26xVPN'
 $process = Start-Process -FilePath $installer -ArgumentList '/S' -PassThru -Wait
@@ -9,7 +9,7 @@ try {
         if (-not (Test-Path (Join-Path $directory $file))) { throw "Missing installed file: $file" }
     }
     $entry = Get-ItemProperty $registry
-    if ($entry.DisplayVersion -ne '0.1.8') { throw 'Wrong installed version' }
+    if ($entry.DisplayVersion -ne '0.1.9') { throw 'Wrong installed version' }
     $shortcut = Join-Path ([Environment]::GetFolderPath('CommonStartMenu')) 'Programs\26x VPN.lnk'
     if (-not (Test-Path $shortcut)) { throw 'Start menu shortcut missing' }
     Add-Type -AssemblyName System.Drawing
@@ -22,9 +22,11 @@ try {
     $test = Start-Process -FilePath (Join-Path $directory '26x-tunnel.exe') -PassThru -Wait -NoNewWindow -RedirectStandardInput (Join-Path $PSScriptRoot 'invalid-profile.json') -RedirectStandardOutput (Join-Path $env:RUNNER_TEMP '26x-worker-result.txt')
     $reply = (Get-Content (Join-Path $env:RUNNER_TEMP '26x-worker-result.txt') -Raw).Trim()
     if ($test.ExitCode -ne 1 -or $reply -ne 'profile_invalid') { throw "Unexpected worker response: $reply" }
-    & (Join-Path $PSScriptRoot 'test_windows_tunnel.ps1') -Directory $directory
+    foreach ($scenario in @('Blocked', 'Crash', 'Healthy')) {
+        & (Join-Path $PSScriptRoot 'test_windows_tunnel.ps1') -Directory $directory -Scenario $scenario
+    }
     $signature = Get-AuthenticodeSignature $installer
-    $report = [ordered]@{ version = '0.1.8'; build = 24; installation = 'passed'; runtimeAssets = 'passed'; workerInputValidation = 'passed'; nativeTunnelDnsAndRouteCleanup = 'passed'; authenticodeStatus = $signature.Status.ToString(); sha256 = (Get-FileHash $installer -Algorithm SHA256).Hash.ToLower() }
+    $report = [ordered]@{ version = '0.1.9'; build = 25; installation = 'passed'; runtimeAssets = 'passed'; workerInputValidation = 'passed'; postTunnelFailureRollback = 'passed'; forcedExitRecovery = 'passed'; nativeTunnelDnsAndRouteCleanup = 'passed'; authenticodeStatus = $signature.Status.ToString(); sha256 = (Get-FileHash $installer -Algorithm SHA256).Hash.ToLower() }
 } finally {
     $uninstaller = Join-Path $directory 'Uninstall.exe'
     if (Test-Path $uninstaller) {

@@ -40,7 +40,7 @@ jobs:
           bash client/scripts/build_windows_tunnel.sh amd64 wintun/bin/amd64/wintun.dll
       - name: Build Windows client
         working-directory: client
-        run: flutter build windows --release --dart-define=API_BASE_URL=https://26xvpn.com
+        run: flutter build windows --release --build-name=0.1.9 --build-number=25 --dart-define=API_BASE_URL=https://26xvpn.com
       - name: Include Wintun license
         shell: bash
         run: cp wintun/LICENSE.txt client/build/windows/x64/runner/Release/
@@ -62,7 +62,7 @@ jobs:
         with:
           name: 26x-Windows-x64
           path: |
-            client/windows/26x-VPN-0.1.8-Setup-x64.exe
+            client/windows/26x-VPN-0.1.9-Setup-x64.exe
             client/windows/windows-package-report.json
             client/windows/windows-icon-preview.png
           if-no-files-found: error

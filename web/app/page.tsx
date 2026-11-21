@@ -1,6 +1,4 @@
 import { cookies } from "next/headers";
-import { publicPlans } from "./account/member-data";
-import { PlanList } from "./account/plans";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
@@ -32,25 +30,23 @@ async function downloadLinks(): Promise<Record<string, string>> {
 export default async function HomePage({ searchParams }: {
   searchParams: Promise<{ ref?: string | string[] }>;
 }) {
-  const [links, { ref }, plans, jar] = await Promise.all([downloadLinks(), searchParams, publicPlans(), cookies()]);
+  const [links, { ref }, jar] = await Promise.all([downloadLinks(), searchParams, cookies()]);
   const signedIn = jar.has("26x_member_session");
   const referral = typeof ref === "string" && /^[A-Za-z0-9_-]{16}$/.test(ref) ? ref : null;
   return (
     <main className="site-shell final-site" id="top">
       <nav className="topbar wrap" aria-label="主导航">
         <a className="brand" href="#top" aria-label="26x 首页"><span className="brand-mark">26</span><span className="brand-x">x</span><span className="brand-domain">VPN</span></a>
-        <div className="nav-links"><a href="#plans">套餐</a><a href="#downloads">下载</a><a href="/support">帮助</a></div>
+        <div className="nav-links"><a href="#features">功能</a><a href="#downloads">下载</a><a href="/support">帮助</a></div>
         <a className="member-entry" href={signedIn ? "/account" : "/account/login"}>{signedIn ? "个人中心" : "登录 / 注册"}</a>
       </nav>
-      <section className="hero wrap">
+      <section className="hero wrap brand-poster" aria-labelledby="poster-title">
         <div className="hero-copy">
-          <div className="eyebrow">26x VPN</div>
-          <h1>一键连接<br /><em>随时切换地区</em></h1>
-          <div className="hero-actions"><a className="button" href="#downloads">下载 26x <span aria-hidden="true">↓</span></a><a className="text-link" href="/support">获取帮助 →</a></div>
+          <h1 id="poster-title">一键连接，<br /><em>隐私随行。</em></h1>
+          <p className="hero-lede">从手机到电脑，一个账号，随时切换线路。<br />会员支持支付宝及 USDT（TRC20）支付。</p>
+          <div className="hero-actions"><a className="button" href="#downloads">下载 26x <span aria-hidden="true">↓</span></a><a className="text-link" href="/account">会员中心 →</a></div>
         </div>
-        <div className="app-preview" aria-hidden="true">
-          <span>26x</span><div className="app-preview-power">⏻</div><div className="app-preview-region">选择线路 <span>›</span></div>
-        </div>
+        <div className="poster-art" aria-hidden="true"><div className="poster-shield" /></div>
       </section>
       <section className="section wrap" id="downloads">
         <div className="section-heading"><div><h2>下载客户端</h2></div><p>请选择与你设备匹配的官方入口。</p></div>
@@ -62,21 +58,15 @@ export default async function HomePage({ searchParams }: {
               <div className="download-actions">
                 {channels.map(([id, label]) => {
                   const address = links[id];
-                  const store = id === "ios-store";
                   return <div className="download-option" key={id}>
                     {address ? <a className="button" href={referral ? `/api/v1/referrals/${referral}/downloads/${id}` : address}>{label}</a>
                       : <button className="button" type="button" disabled>{label}</button>}
-                    {store && <span className="download-tax">商店税贵10%</span>}
                   </div>;
                 })}
               </div>
             </article>
           ))}
         </div>
-      </section>
-      <section className="section wrap" id="plans">
-        <div className="section-heading"><div><h2>会员套餐</h2></div><p>按次付费，可提前续费。支持支付宝和 USDT（TRC20）。</p></div>
-        {plans?.length ? <PlanList plans={plans} /> : <p>套餐暂时无法显示，请稍后再试。</p>}
       </section>
       <section className="section wrap" id="features">
         <div className="section-heading"><div><h2>连接和设备，<em>一处管理</em></h2></div></div>

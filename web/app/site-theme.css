@@ -61,42 +61,26 @@
   .site-shell .button { transition: none; }
 }
 
-.final-site .hero { gap: clamp(20px, 6vw, 84px); min-height: 490px; }
-.final-site .hero h1 { font-size: clamp(40px, 6vw, 70px); }
-.final-site .app-preview {
-  min-height: 325px;
-  width: min(100%, 460px);
-  justify-self: center;
-  display: grid;
-  justify-items: center;
-  align-content: center;
-  gap: 24px;
-  border: 1px solid var(--line);
-  border-radius: 24px;
-  color: var(--ink);
-  background: radial-gradient(ellipse at 50% 28%, #2d4149, #151922 72%);
-  box-shadow: 0 24px 56px #0c10184d;
+.final-site .brand-poster {
+  position:relative; isolation:isolate; overflow:hidden;
+  margin-block:clamp(18px,3vw,40px); padding:clamp(26px,5vw,78px);
+  min-height:clamp(340px,40vw,500px); gap:24px;
+  border:1px solid #3d5964; border-radius:26px;
+  background:linear-gradient(112deg,#131f2a 16%,#17323b 75%,#20444b);
 }
-.app-preview > span { font-size: 23px; font-weight: 800; }
-.app-preview-power {
-  display: grid;
-  place-items: center;
-  width: 112px;
-  aspect-ratio: 1;
-  border: 2px solid var(--teal);
-  border-radius: 50%;
-  color: var(--teal);
-  background: #203c3d;
-  font-size: 45px;
+.brand-poster .hero-copy {position:relative; z-index:1; padding:0}
+.final-site .brand-poster h1 {margin:0 0 20px; font-size:clamp(40px,5.3vw,76px); line-height:1.13}
+.brand-poster .hero-lede {color:#d1dbe3}
+.poster-art {position:relative; display:grid; place-items:center; min-height:220px}
+.poster-art::before {
+  content:""; position:absolute; z-index:-1; width:170%; aspect-ratio:1;
+  background:repeating-radial-gradient(circle,transparent 0 11%,#85dfcf24 11.12% 11.4%,transparent 11.55% 14%),
+    radial-gradient(circle,#469d9670,transparent 68%);
 }
-.app-preview-region {
-  display: flex;
-  align-items: center;
-  gap: 24px;
-  border: 1px solid var(--line);
-  border-radius: 24px;
-  padding: 9px 18px;
-  background: var(--panel);
+.poster-shield {
+  width:clamp(128px,17vw,238px); aspect-ratio:1;
+  background:url("./poster-shield.png") center/contain no-repeat;
+  filter:drop-shadow(0 16px 24px #07182099);
 }
 .final-site .section { padding-block: 64px; }
 .download-grid { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 16px; }
@@ -113,14 +97,16 @@
 .download-option { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
 .download-option .button { min-width: 0; height: 40px; padding-inline: 12px; }
 .download-option .button:disabled { opacity: .56; cursor: not-allowed; transform: none; }
-.download-tax { color: var(--gold); font-size: 12px; white-space: nowrap; }
 .final-site .download-option .button { background: var(--gold); color: #292115; }
 .final-site .download-option .button:not(:disabled):hover { background: #ffdfa7; }
 .final-site .feature-card { min-height: 130px; }
 @media (max-width: 900px) { .download-grid { grid-template-columns: repeat(2,minmax(0,1fr)); } }
 @media (max-width: 650px) {
-  .final-site .hero { min-height: auto; padding-bottom: 32px; }
-  .final-site .app-preview { margin: 32px auto 0; min-height: 270px; }
+  .final-site .brand-poster {display:flex;flex-direction:column-reverse;align-items:flex-start;gap:18px;min-height:0}
+  .poster-art {min-height:0;align-self:flex-end}
+  .poster-shield {width:94px}
+  .poster-art::before {width:620%}
+  .brand-poster .hero-actions {margin-top:22px}
   .final-site .section { padding-block: 44px; }
 }
 @media (max-width: 420px) { .download-grid { grid-template-columns: 1fr; } }

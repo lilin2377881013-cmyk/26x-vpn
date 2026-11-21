@@ -4,7 +4,13 @@ import 'dart:io';
 
 /// Owns the libXray worker and its inherited stdin lifetime pipe.
 class WindowsTunnel {
-  WindowsTunnel({required this.onState});
+  WindowsTunnel({
+    required this.onState,
+    Future<Process> Function()? startWorker,
+  }) : _startWorker = startWorker ?? _startInstalledWorker;
+
+  final Future<Process> Function() _startWorker;
+  Future<void>? _writeConfig;
 
   final void Function(Map<String, String>) onState;
   Future<Process>? _launch;
@@ -12,17 +18,17 @@ class WindowsTunnel {
   Future<Map<String, String>>? _stopping;
   Map<String, String> status = const {'state': 'disconnected'};
 
+  static Future<Process> _startInstalledWorker() {
+    final runtime = File(Platform.resolvedExecutable).parent;
+    final engine = File('${runtime.path}\\26x-tunnel.exe');
+    return Process.start(engine.path, const [], workingDirectory: runtime.path);
+  }
+
   Future<Map<String, String>> connect(String config) async {
     if (_launch != null || _process != null || _stopping != null) {
       return const {'code': 'tunnel_busy'};
     }
-    final runtime = File(Platform.resolvedExecutable).parent;
-    final engine = File('${runtime.path}\\26x-tunnel.exe');
-    final launch = _launch = Process.start(
-      engine.path,
-      const [],
-      workingDirectory: runtime.path,
-    );
+    final launch = _launch = _startWorker();
     late final Process process;
     try {
       process = await launch;
@@ -70,6 +76,7 @@ class WindowsTunnel {
       process.exitCode.then((_) {
         if (_process != process) return;
         _process = null;
+        _writeConfig = null;
         if (_stopping == null && status['state'] == 'connected') {
           _publish(const {'state': 'error', 'code': 'tunnel_data_failed'});
         }
@@ -78,8 +85,13 @@ class WindowsTunnel {
 
     var failure = 'tunnel_start_failed';
     try {
+      if (_stopping != null) {
+        await _stopping;
+        return const {'code': 'tunnel_start_failed'};
+      }
       process.stdin.writeln(config);
-      await process.stdin.flush().timeout(const Duration(seconds: 3));
+      _writeConfig = process.stdin.flush();
+      await _writeConfig!.timeout(const Duration(seconds: 3));
       final reply = await started.future.timeout(const Duration(seconds: 42));
       if (reply['state'] == 'connected' &&
           _process == process &&
@@ -117,9 +129,14 @@ class WindowsTunnel {
     if (process == null) return _publish(const {'state': 'disconnected'});
     try {
       try {
+        // IOSink.close throws while flush is still bound to its stream.
+        // Finish the configuration write first, even on immediate disconnect.
+        await _writeConfig?.timeout(const Duration(seconds: 2));
         await process.stdin.close().timeout(const Duration(seconds: 2));
       } on IOException {
         // The worker may already be exiting.
+      } on StateError {
+        // A closed input can no longer deliver EOF. Bound the exit wait below.
       }
       await process.exitCode.timeout(const Duration(seconds: 11));
     } on TimeoutException {

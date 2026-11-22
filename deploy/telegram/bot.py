@@ -49,6 +49,8 @@ def connect_db():
           source TEXT, event TEXT, visitor BLOB, PRIMARY KEY(source,event,visitor));
         CREATE TABLE IF NOT EXISTS totals (
           source TEXT, event TEXT, count INTEGER NOT NULL, PRIMARY KEY(source,event));
+        CREATE TABLE IF NOT EXISTS active_referrals (
+          chat_key BLOB PRIMARY KEY, source TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS files (
           release TEXT PRIMARY KEY, file_id TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS imports (
@@ -280,6 +282,15 @@ def handle(db, update):
             if source.startswith("upload_"):
                 pair_upload(db, chat, source.removeprefix("upload_"))
                 return
+        chat_key = hmac.digest(bytes.fromhex(setting(db, "salt")), f"active-referral:{chat}".encode(), "sha256")
+        if action == "start":
+            if CODE.fullmatch(source):
+                db.execute("INSERT OR REPLACE INTO active_referrals VALUES (?,?)", (chat_key, source))
+            else:
+                db.execute("DELETE FROM active_referrals WHERE chat_key=?", (chat_key,))
+        else:
+            row = db.execute("SELECT source FROM active_referrals WHERE chat_key=?", (chat_key,)).fetchone()
+            source = row[0] if row else ""
     if not CODE.fullmatch(source):
         source = ""
     if action in ("start", "download", "home"):
@@ -316,14 +327,29 @@ def report(db, source):
       FROM totals t WHERE t.source=? ORDER BY t.event""",(source,))]
 
 
+def channel_summary(db):
+    rows = db.execute("""
+        SELECT source,
+               COUNT(DISTINCT CASE WHEN event='start' THEN visitor END),
+               COUNT(DISTINCT CASE WHEN event IN ('sent/android','sent/macos','sent/windows') THEN visitor END),
+               COUNT(DISTINCT CASE WHEN event='sent/ios-tf' THEN visitor END)
+        FROM audience
+        WHERE source != '' AND event IN ('start','sent/android','sent/macos','sent/windows','sent/ios-tf')
+        GROUP BY source
+    """)
+    return [{"code": code, "started": started, "packages": packages, "testflight": testflight}
+            for code, started, packages, testflight in rows]
+
+
 class Stats(BaseHTTPRequestHandler):
     def do_GET(self):
         code = self.path.removeprefix("/referrals/")
-        if self.path != "/referrals/"+code or not CODE.fullmatch(code):
+        overview = self.path == "/referrals"
+        if not overview and (self.path != "/referrals/"+code or not CODE.fullmatch(code)):
             self.send_error(404)
             return
         with contextlib.closing(sqlite3.connect(STATE/"assistant.sqlite3")) as db:
-            data = json.dumps({"items":report(db,code)}).encode()
+            data = json.dumps({"items": channel_summary(db) if overview else report(db, code)}).encode()
         self.send_response(200)
         self.send_header("Content-Type","application/json")
         self.send_header("Cache-Control","no-store")

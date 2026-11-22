@@ -443,25 +443,51 @@ function ReferralReport({ code }: { code: string }) {
 }
 
 type BotMetric = { event: string; people: number; count: number };
+type BotChannel = { code: string; started: number; packages: number; testflight: number };
 const botPlatforms: Record<string, string> = { "ios-tf": "iPhone / iPad", android: "安卓", windows: "Windows", macos: "Mac" };
 const botEvents: Record<string, string> = { start: "启动", choose: "选择平台", request: "点击领取", sent: "发出安装包" };
 
-function TelegramReport({ code }: { code: string }) {
-  const [rows, setRows] = useState<BotMetric[]>();
-  const [failed, setFailed] = useState(false);
+function useTelegramStats<T>(code?: string) {
+  const [rows, setRows] = useState<T[]>();
+  const [error, setError] = useState("");
   useEffect(() => {
     const controller = new AbortController();
-    fetch(`/admin/telegram-stats?code=${encodeURIComponent(code)}`, { signal: controller.signal, cache: "no-store" })
+    const path = code ? `/admin/telegram-stats?code=${encodeURIComponent(code)}` : "/admin/telegram-stats";
+    fetch(path, { signal: controller.signal, cache: "no-store" })
       .then(async response => {
-        if (!response.ok) throw new Error();
+        if (response.status === 401) throw new Error("登录已过期，请重新登录后台。");
+        if (response.status === 403) throw new Error("当前账号没有查看推广统计的权限。");
+        if (!response.ok) throw new Error("暂时无法读取机器人统计，请点击刷新重试。");
         const data = await response.json();
+        if (!Array.isArray(data?.items)) throw new Error("机器人统计响应异常，请点击刷新重试。");
         if (!controller.signal.aborted) setRows(data.items);
-      }).catch(() => { if (!controller.signal.aborted) setFailed(true); });
+      }).catch(error => { if (!controller.signal.aborted) setError(error.message || "无法读取机器人统计"); });
     return () => controller.abort();
   }, [code]);
-  return <section className={styles.card} aria-label="Telegram 广告统计">
-    <h2>Telegram 广告累计数据</h2>
-    {failed ? <p role="status">暂时无法读取机器人统计。</p> : !rows ? <p>正在读取…</p> :
+  return { rows, error };
+}
+
+function TelegramOverview({ referrals }: { referrals: Referral[] }) {
+  const { rows, error } = useTelegramStats<BotChannel>();
+  const byCode = new Map(rows?.map(row => [row.code, row]));
+  return <section className={styles.card} aria-label="TG 机器人渠道统计" style={{ overflowX: "auto" }}>
+    <h2>TG 机器人渠道统计</h2>
+    <p>每个渠道按人累计。同一人领取多个平台的安装包只计 1 人。iOS 的 TestFlight 邀请单独统计。</p>
+    {error ? <ErrorMessage message={error} /> : !rows ? <p>正在读取机器人统计…</p> :
+      <table><thead><tr><th>推广渠道</th><th>点「开始」人数</th><th>领取安装包人数</th><th>领取 TestFlight 链接人数</th></tr></thead>
+        <tbody>{referrals.map(channel => {
+          const metric = byCode.get(channel.code);
+          return <tr key={channel.code}><th scope="row">{channel.name}</th><td>{metric?.started ?? 0}</td>
+            <td>{metric?.packages ?? 0}</td><td>{metric?.testflight ?? 0}</td></tr>;
+        })}</tbody></table>}
+  </section>;
+}
+
+function TelegramReport({ code }: { code: string }) {
+  const { rows, error } = useTelegramStats<BotMetric>(code);
+  return <section className={styles.card} aria-label="Telegram 渠道统计明细">
+    <h2>Telegram 渠道明细</h2>
+    {error ? <ErrorMessage message={error} /> : !rows ? <p>正在读取…</p> :
       rows.length === 0 ? <p>这个推广链接还没有机器人互动。</p> :
       <table><thead><tr><th>平台</th><th>事件</th><th>人数（去重）</th><th>次数</th></tr></thead>
         <tbody>{rows.map(({event, people, count}) => {
@@ -507,6 +533,7 @@ export function ReferralLinks() {
   }
 
   return <Page title="代理推广" action={<button onClick={() => setRefresh(refresh + 1)}>刷新</button>}>
+    {data && data.items.length > 0 && <TelegramOverview key={refresh} referrals={data.items} />}
     <form className={styles.card + " admin-form"} onSubmit={create}>
       <label>代理名称<input name="name" required maxLength={80} /></label>
       <div><button className="primary-action" disabled={busy}>{busy ? "生成中…" : "生成代理链接"}</button></div>
@@ -514,7 +541,7 @@ export function ReferralLinks() {
     </form>
     {error ? <ErrorMessage message={error} /> : !data ? <p>正在加载代理数据…</p> :
       data.items.length === 0 ? <p>暂无代理链接。</p> : <div className={styles.card} style={{ overflowX: "auto" }}>
-        <table><thead><tr><th>代理</th><th>官网推广链接</th><th>Telegram 广告链接</th><th>官网访问次数</th><th>下载点击</th><th>统计明细</th></tr></thead>
+        <table><thead><tr><th>代理</th><th>官网推广链接</th><th>Telegram 推广链接</th><th>官网访问次数</th><th>下载点击</th><th>统计明细</th></tr></thead>
           <tbody>{data.items.map((item) => {
             const link = `/api/v1/referrals/${item.code}`;
             const tg = `https://t.me/Get26xbot?start=${item.code}`;

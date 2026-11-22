@@ -75,6 +75,30 @@ class AssistantTest(unittest.TestCase):
         self.assertEqual(self.db.execute("SELECT count(*) FROM imports").fetchone()[0], 0)
         self.assertEqual(self.db.execute("SELECT count(*) FROM upload_batches").fetchone()[0], 0)
 
+    def test_summary_counts_people_across_packages_and_channels(self):
+        ad, group = "a" * 16, "g" * 16
+        for source, chat, events in [
+            (ad, 100, ["start", "start", "sent/android", "sent/android", "sent/windows", "sent/ios-tf"]),
+            (ad, 101, ["start", "request/windows"]),
+            (ad, 102, ["start", "sent/macos"]),
+            (group, 100, ["start", "sent/ios-tf"]),
+            ("", 103, ["start", "sent/macos"]),
+        ]:
+            for event in events:
+                bot.record(self.db, source, event, chat)
+        self.assertEqual(bot.channel_summary(self.db), [
+            {"code": ad, "started": 3, "packages": 2, "testflight": 1},
+            {"code": group, "started": 1, "packages": 0, "testflight": 1},
+        ])
+
+    @patch.dict("os.environ", {"TELEGRAM_POSTER_FILE_ID": "official-poster"})
+    def test_download_command_uses_current_channel(self):
+        for chat, source in [(10, "a" * 16), (20, "g" * 16), (10, "g" * 16), (10, "")]:
+            self.message(chat, text="/start " + source)
+            self.message(chat, text="/download")
+            keyboard = self.api.call_args.args[1]["reply_markup"]["inline_keyboard"]
+            self.assertEqual(keyboard[0][0]["callback_data"].partition(":")[2], source)
+
     def test_old_document_not_sent_after_new_release(self):
         self.db.execute("INSERT INTO files VALUES ('v1','outdated')")
         with patch.object(bot, "download_info", return_value=("https://26xvpn.com/downloads/new.apk",

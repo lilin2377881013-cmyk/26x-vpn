@@ -3,8 +3,8 @@ import type { NextRequest } from "next/server";
 export const dynamic = "force-dynamic";
 
 export async function GET(request: NextRequest) {
-  const code = request.nextUrl.searchParams.get("code") ?? "";
-  if (!/^[A-Za-z0-9_-]{16}$/.test(code)) return new Response(null, { status: 400 });
+  const code = request.nextUrl.searchParams.get("code");
+  if (code !== null && !/^[A-Za-z0-9_-]{16}$/.test(code)) return new Response(null, { status: 400 });
   const origin = process.env.API_ORIGIN ?? "http://127.0.0.1:8080";
   try {
     const session = await fetch(new URL("/api/v1/admin/me", origin), {
@@ -14,7 +14,8 @@ export async function GET(request: NextRequest) {
     if (!session.ok) return new Response(null, { status: session.status });
     const { role } = await session.json();
     if (role !== "owner" && role !== "operations") return new Response(null, { status: 403 });
-    const stats = await fetch(`http://127.0.0.1:8796/referrals/${code}`, {
+    const path = code === null ? "/referrals" : `/referrals/${code}`;
+    const stats = await fetch(`http://127.0.0.1:8796${path}`, {
       cache: "no-store", redirect: "error", signal: AbortSignal.timeout(4000),
     });
     if (!stats.ok) return new Response(null, { status: 503 });

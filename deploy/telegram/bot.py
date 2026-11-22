@@ -31,6 +31,12 @@ PLATFORMS = {
     "macos": ("Mac", "打开 DMG，把 26x 拖入「应用程序」。首次连接时，按 macOS 提示允许 26x 的网络扩展和 VPN 配置。"),
 }
 WELCOME = "26x VPN · 官方下载助手\n\n选择你的设备，获取最新版和安装指南。新用户可以在客户端免费试用 15 分钟。"
+DESCRIPTION = (
+    "26x VPN · 稳定运营 5 年+\n\n"
+    "电信、联通、移动三网深度优化，流量不限。\n"
+    "新用户注册可免费试用 15 分钟，会员支持 USDT 支付。\n\n"
+    "点击下方「开始」，选择你的设备，领取客户端。"
+)
 TRIAL = "15 分钟免费试用\n\n打开 26x，在「连接」页点击「免费试用」。首次启用后开始计时，到期后自动断开。已经注册的用户也可以在符合试用条件时体验。"
 HELP = "安装与连接帮助\n\n选择设备可查看对应安装步骤。如果连接时报错，请把设备系统和完整错误码发给客服。"
 PRIVACY = "推广统计按广告来源汇总启动人数、设备选择和领取次数。人数按来源去重，统计库不保存聊天正文和 Telegram 用户名。"
@@ -409,7 +415,8 @@ if __name__ == "__main__":
             if telegram("getMe", {})["username"].lower() != BOT.lower():
                 raise ValueError("Token belongs to a different bot")
             telegram("setMyName", {"name":"26x 官方助手"})
-            telegram("setMyDescription", {"description":"获取 26x 官方客户端，查看 iPhone、安卓、Windows 和 Mac 安装指南，了解新用户 15 分钟免费试用，或联系人工客服。"})
+            for language in ("", "zh"):
+                telegram("setMyDescription", {"description": DESCRIPTION, "language_code": language})
             telegram("setMyShortDescription", {"short_description":"26x VPN 官方下载、安装指南与人工客服。"})
             telegram("setMyCommands", {"commands":COMMANDS})
             poster = Path(os.environ["TELEGRAM_POSTER_FILE"])

@@ -11,6 +11,10 @@
 
 本地运行时设置 `TELEGRAM_TOKEN_FILE`、`TELEGRAM_POSTER_FILE` 和 `TELEGRAM_STATE_DIR`，执行 `python3 bot.py run`。首次配置机器人名称、头像和命令使用 `python3 bot.py profile`。
 
+### 首次打开时的介绍卡
+
+`profile` 将介绍卡文字同步到默认语言和中文。创建机器人的账号可在 @BotFather 的 `/mybots` 中选择 @Get26xbot，进入 Edit Bot → Edit Description Picture，上传本目录的 `26x-intro-640x360.jpg`。海报显示在新访客点「开始」之前。
+
 ### 官网的普通 SSH 账号部署
 
 官网使用 `tgdeploy` 的 systemd 用户服务。程序和头像位于 `~/.local/share/26x-telegram/app/`，SQLite 库位于同级的 `state/`。令牌文件为 `~/.config/26x-telegram/token`，权限为 0600。将本目录的 `26x-telegram.user.service` 安装为 `~/.config/systemd/user/26x-telegram.service`。迁移时先停止旧主机上的接收进程，再导出 SQLite 最终快照。

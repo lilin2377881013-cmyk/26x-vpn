@@ -11,6 +11,12 @@
 
 本地运行时设置 `TELEGRAM_TOKEN_FILE`、`TELEGRAM_POSTER_FILE` 和 `TELEGRAM_STATE_DIR`，执行 `python3 bot.py run`。首次配置机器人名称、头像和命令使用 `python3 bot.py profile`。
 
+### 官网的普通 SSH 账号部署
+
+官网使用 `tgdeploy` 的 systemd 用户服务。程序和头像位于 `~/.local/share/26x-telegram/app/`，SQLite 库位于同级的 `state/`。令牌文件为 `~/.config/26x-telegram/token`，权限为 0600。将本目录的 `26x-telegram.user.service` 安装为 `~/.config/systemd/user/26x-telegram.service`。迁移时先停止旧主机上的接收进程，再导出 SQLite 最终快照。
+
+以部署账号运行 `loginctl enable-linger`，然后运行 `systemctl --user daemon-reload` 和 `systemctl --user enable --now 26x-telegram.service`。用 `loginctl show-user tgdeploy -p Linger` 核对返回值为 `yes`，再用 `systemctl --user status 26x-telegram` 查看运行状态。这样即使所有 SSH 会话都已断开，服务也能在服务器上持续运行并随服务器启动。
+
 ## 更新安装包
 
 官网发布新版后，机器人按最新下载地址、尺寸和文件版本标识查找已经存入 Telegram 的安装包。小于上传上限的包会在用户首次领取时上传。较大的包需要先用 Telegram 客户端发送一次。新包正在同步时，机器人提供官网中的同一版本下载地址。

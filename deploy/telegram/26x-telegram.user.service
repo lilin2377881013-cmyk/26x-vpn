@@ -1,0 +1,17 @@
+[Unit]
+Description=26x Telegram download assistant
+
+[Service]
+WorkingDirectory=%h/.local/share/26x-telegram/app
+Environment=TELEGRAM_STATE_DIR=%h/.local/share/26x-telegram/state
+Environment=TELEGRAM_TOKEN_FILE=%h/.config/26x-telegram/token
+Environment=TELEGRAM_POSTER_FILE=%h/.local/share/26x-telegram/app/26x-icon-original.jpg
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/usr/bin/python3 %h/.local/share/26x-telegram/app/bot.py run
+Restart=always
+RestartSec=8
+UMask=0077
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=default.target

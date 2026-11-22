@@ -1,0 +1,36 @@
+name: Build admin channel report
+on:
+  push:
+    branches: [build/web-channel-report-eb1abb9]
+permissions:
+  contents: read
+jobs:
+  web:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    defaults:
+      run:
+        working-directory: web
+    env:
+      NEXT_TELEMETRY_DISABLED: 1
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26.13.1
+      - run: npm ci --no-audit --no-fund
+      - run: npm run build
+      - run: |
+          cp -a .next/static .next/standalone/.next/
+          mkdir -p .next/standalone/.next/cache
+          tar -C .next/standalone -czf web-release.tgz .
+          sha256sum web-release.tgz > SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: admin-channel-report-linux-x64
+          path: |
+            web/web-release.tgz
+            web/SHA256SUMS
+          retention-days: 3

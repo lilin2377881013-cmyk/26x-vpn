@@ -1,0 +1,23 @@
+[Unit]
+Description=26x Telegram download assistant
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+DynamicUser=yes
+StateDirectory=26x-telegram
+StateDirectoryMode=0700
+LoadCredential=token:/etc/26x/telegram.token
+Environment=TELEGRAM_TOKEN_FILE=%d/token
+Environment=TELEGRAM_POSTER_FILE=/opt/26x/telegram/26x-icon-original.jpg
+ExecStart=/usr/bin/python3 /opt/26x/telegram/bot.py run
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

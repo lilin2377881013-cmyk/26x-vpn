@@ -49,5 +49,5 @@ func (s *server) registerAccount(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "registration_failed", "注册失败，请稍后再试")
 		return
 	}
-	s.issueSession(w, r, actor{id: id, kind: "user"})
+	s.issueSession(w, r, actor{id: id, kind: "user"}, hash)
 }

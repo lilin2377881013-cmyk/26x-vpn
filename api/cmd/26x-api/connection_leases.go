@@ -47,6 +47,20 @@ func (s *server) acquireConnectionLease(w http.ResponseWriter, r *http.Request) 
 		connectionLeaseError(w)
 		return
 	}
+	// A replacement login can win the user lock after middleware admitted a request.
+	if user.sessionID != "" {
+		var valid bool
+		err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM sessions WHERE id=$1 AND actor_id=$2
+			AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at>clock_timestamp()))`, user.sessionID, user.id).Scan(&valid)
+		if err != nil {
+			connectionLeaseError(w)
+			return
+		}
+		if !valid {
+			s.userAuthError(w, sql.ErrNoRows)
+			return
+		}
+	}
 	var quotaAvailable bool
 	err = tx.QueryRowContext(ctx, `SELECT unrestricted OR monthly_quota_bytes IS NULL OR (
 		SELECT COALESCE(sum(bytes_up) + sum(bytes_down), 0) < monthly_quota_bytes

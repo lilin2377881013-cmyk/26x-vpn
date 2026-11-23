@@ -35,10 +35,11 @@ type server struct {
 }
 
 type actor struct {
-	id   string
-	kind string
-	role string
-	csrf string
+	sessionID string
+	id        string
+	kind      string
+	role      string
+	csrf      string
 }
 
 type loginLimiter struct {
@@ -220,7 +221,7 @@ func (s *server) adminLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.limiter.clear(clientIP(r, s.cfg.trustedProxies))
-	s.issueSession(w, r, actor{id: id, kind: "admin", role: role})
+	s.issueSession(w, r, actor{id: id, kind: "admin", role: role}, "")
 }
 
 func (s *server) userLogin(w http.ResponseWriter, r *http.Request) {
@@ -239,13 +240,17 @@ func (s *server) userLogin(w http.ResponseWriter, r *http.Request) {
 	input.Email = strings.ToLower(strings.TrimSpace(input.Email))
 	var id, passwordHash, status string
 	err := s.db.QueryRowContext(r.Context(), `SELECT id, password_hash, status FROM users WHERE email = $1`, input.Email).Scan(&id, &passwordHash, &status)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		writeError(w, http.StatusServiceUnavailable, "database_unavailable", "Account service is temporarily unavailable")
+		return
+	}
 	if err != nil || status != "active" || !s.verifyPassword(passwordHash, input.Password) {
 		s.limiter.fail(clientIP(r, s.cfg.trustedProxies))
 		writeError(w, http.StatusUnauthorized, "invalid_credentials", "Email or password is incorrect")
 		return
 	}
 	s.limiter.clear(clientIP(r, s.cfg.trustedProxies))
-	s.issueSession(w, r, actor{id: id, kind: "user"})
+	s.issueSession(w, r, actor{id: id, kind: "user"}, passwordHash)
 }
 
 // Website sessions coexist with the native client and admin console cookies.
@@ -254,32 +259,6 @@ func sessionNames(r *http.Request, kind string) (string, string) {
 		return "26x_member_session", "26x_member_csrf"
 	}
 	return sessionCookie, csrfCookie
-}
-
-func (s *server) issueSession(w http.ResponseWriter, r *http.Request, current actor) {
-	token, err := randomToken(32)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Unable to create a session")
-		return
-	}
-	csrf, err := randomToken(24)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Unable to create a session")
-		return
-	}
-	expires := time.Now().UTC().Add(12 * time.Hour)
-	tokenHash := sha256.Sum256([]byte(token))
-	_, err = s.db.ExecContext(r.Context(), `INSERT INTO sessions(actor_kind, actor_id, token_hash, csrf_token, expires_at)
-		VALUES ($1, $2, $3, $4, $5)`, current.kind, current.id, tokenHash[:], csrf, expires)
-	if err != nil {
-		s.logger.Error("create session", "kind", current.kind, "error", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Unable to create a session")
-		return
-	}
-	sessionName, csrfName := sessionNames(r, current.kind)
-	http.SetCookie(w, &http.Cookie{Name: sessionName, Value: token, Path: "/", Expires: expires, MaxAge: 12 * 60 * 60, HttpOnly: true, Secure: s.cfg.cookieSecure, SameSite: http.SameSiteLaxMode})
-	http.SetCookie(w, &http.Cookie{Name: csrfName, Value: csrf, Path: "/", Expires: expires, MaxAge: 12 * 60 * 60, Secure: s.cfg.cookieSecure, SameSite: http.SameSiteLaxMode})
-	writeJSON(w, http.StatusCreated, map[string]any{"role": current.role, "expiresAt": expires.Format(time.RFC3339)})
 }
 
 func (s *server) requireAdmin(next http.HandlerFunc, allowedRoles ...string) http.HandlerFunc {
@@ -309,7 +288,7 @@ func (s *server) requireUser(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		current, err := s.authenticate(r, "user")
 		if err != nil {
-			writeError(w, http.StatusUnauthorized, "sign_in_required", "Sign in to your 26x account")
+			s.userAuthError(w, err)
 			return
 		}
 		r = r.WithContext(contextWithActor(r, current))
@@ -321,20 +300,35 @@ func (s *server) authenticate(r *http.Request, kind string) (actor, error) {
 	name, _ := sessionNames(r, kind)
 	cookie, err := r.Cookie(name)
 	if err != nil || cookie.Value == "" {
-		return actor{}, errors.New("missing session")
+		return actor{}, sql.ErrNoRows
 	}
 	tokenHash := sha256.Sum256([]byte(cookie.Value))
 	var current actor
-	var expires time.Time
-	err = s.db.QueryRowContext(r.Context(), `SELECT s.actor_id::text, s.actor_kind, s.csrf_token, s.expires_at,
+	var channel string
+	err = s.db.QueryRowContext(r.Context(), `SELECT s.id::text, s.actor_id::text, s.actor_kind, s.csrf_token, COALESCE(s.member_channel, ''),
 		CASE WHEN s.actor_kind = 'admin' THEN COALESCE(a.role, '') ELSE '' END
 		FROM sessions s
 		LEFT JOIN admin_accounts a ON s.actor_kind = 'admin' AND a.id = s.actor_id AND a.disabled_at IS NULL
 		LEFT JOIN users u ON s.actor_kind = 'user' AND u.id = s.actor_id AND u.status = 'active'
-		WHERE s.token_hash = $1 AND s.actor_kind = $2 AND s.revoked_at IS NULL AND s.expires_at > now()
-		AND ((s.actor_kind = 'admin' AND a.id IS NOT NULL) OR (s.actor_kind = 'user' AND u.id IS NOT NULL))`, tokenHash[:], kind).Scan(&current.id, &current.kind, &current.csrf, &expires, &current.role)
+		WHERE s.token_hash = $1 AND s.actor_kind = $2 AND s.revoked_at IS NULL AND (s.expires_at IS NULL OR s.expires_at > now())
+		AND ((s.actor_kind = 'admin' AND a.id IS NOT NULL) OR (s.actor_kind = 'user' AND u.id IS NOT NULL))`, tokenHash[:], kind).Scan(&current.sessionID, &current.id, &current.kind, &current.csrf, &channel, &current.role)
 	if err != nil {
 		return actor{}, err
+	}
+	if channel != "" {
+		want := memberChannel(r)
+		if channel == "legacy" {
+			// A concurrent login may already have revoked this token.
+			err = s.db.QueryRowContext(r.Context(), `UPDATE sessions SET member_channel=$2 WHERE id=$1
+				AND member_channel IN ('legacy',$2) AND revoked_at IS NULL RETURNING member_channel`,
+				current.sessionID, want).Scan(&channel)
+			if err != nil {
+				return actor{}, err
+			}
+		}
+		if channel != want || (channel == "portal" && !portalAllows(r)) {
+			return actor{}, sql.ErrNoRows
+		}
 	}
 	return current, nil
 }
@@ -360,7 +354,7 @@ func (s *server) withUserCSRF(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		current, err := s.authenticate(r, "user")
 		if err != nil {
-			writeError(w, http.StatusUnauthorized, "sign_in_required", "Sign in to your 26x account")
+			s.userAuthError(w, err)
 			return
 		}
 		_, name := sessionNames(r, "user")
@@ -379,7 +373,10 @@ func (s *server) logout(w http.ResponseWriter, r *http.Request) {
 	sessionName, csrfName := sessionNames(r, current.kind)
 	if cookie, err := r.Cookie(sessionName); err == nil {
 		hash := sha256.Sum256([]byte(cookie.Value))
-		_, _ = s.db.ExecContext(r.Context(), "UPDATE sessions SET revoked_at = now() WHERE token_hash = $1 AND actor_id = $2", hash[:], current.id)
+		if _, err = s.db.ExecContext(r.Context(), "UPDATE sessions SET revoked_at = now() WHERE token_hash = $1 AND actor_id = $2", hash[:], current.id); err != nil {
+			writeError(w, http.StatusServiceUnavailable, "session_unavailable", "Could not sign out. Try again.")
+			return
+		}
 	}
 	clearCookie(w, sessionName, true, s.cfg.cookieSecure)
 	clearCookie(w, csrfName, false, s.cfg.cookieSecure)

@@ -111,7 +111,7 @@ func (s *server) startTrial(w http.ResponseWriter, r *http.Request) {
 		trialError(w)
 		return
 	}
-	s.issueSession(w, r, actor{id: user, kind: "user"})
+	s.issueSession(w, r, actor{id: user, kind: "user"}, "")
 }
 
 func trialError(w http.ResponseWriter) {

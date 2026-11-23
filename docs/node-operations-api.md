@@ -117,18 +117,14 @@ operator's grant script.
 
 ## Trial and checkout
 
-Migration 009 adds an anonymous trial account for each installation token.
-`POST /api/v1/auth/trial` accepts the platform and a random, base64url
-installation token. Keep the token in secure storage. The human-readable
-`trialCode` from `GET /api/v1/me` is an identifier only. The 15-minute
-window starts when the account is created. Retrying with the same
-installation token preserves the account and expiry.
+Public registration creates the account and its 15-minute subscription in one
+transaction. The window starts at registration. Signing in or registering a
+device uses the existing deadline. The retired anonymous trial endpoint
+returns `403 registration_required`. Registered accounts read their current
+`planCode` and `subscriptionEndsAt` through authenticated `GET /api/v1/me`.
 
-The trial currently requires an online managed VLESS endpoint with
-`MANAGED_VLESS_REQUIRE_LEASE=true`. Set `MANAGED_VLESS_TRIAL_ONLY=true` on a
-regional deployment and supply a dedicated managed endpoint. Trial accounts
-use that endpoint, and paid accounts continue to use regional allocation.
-Existing unmanaged credentials cannot enforce trial expiry on the node.
+Trial connections use an assigned Hong Kong regional endpoint and a lease
+bounded by the trial deadline. A verified purchase activates the paid plan.
 
 `POST /api/v1/me/checkout` requires a user session and CSRF token. Its
 JSON request is `{"planCode":"standard-30d"}`. The API validates the plan

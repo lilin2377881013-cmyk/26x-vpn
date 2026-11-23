@@ -34,6 +34,10 @@ func TestPaymentCheckoutAndNotification(t *testing.T) {
 		VALUES ('payment-test@example.test','unused') RETURNING id::text`).Scan(&userID); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := db.Exec(`INSERT INTO subscriptions(user_id,plan_id,status,starts_at,ends_at)
+		SELECT $1,id,'active',now(),now()+interval '15 minutes' FROM plans WHERE code='trial-15m'`, userID); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := db.Exec(`INSERT INTO plans(code,name,tier,duration_days,price_cents,currency,max_devices)
 		VALUES ('paid-test','Payment test','standard',30,3600,'CNY',2)`); err != nil {
 		t.Fatal(err)
@@ -137,7 +141,9 @@ func TestPaymentCheckoutAndNotification(t *testing.T) {
 	}
 	wg.Wait()
 	var subscriptions int
-	if err := db.QueryRow("SELECT count(*) FROM subscriptions WHERE user_id=$1", userID).Scan(&subscriptions); err != nil || subscriptions != 1 {
+	if err := db.QueryRow(`SELECT count(*) FROM subscriptions s JOIN plans p ON p.id=s.plan_id
+	WHERE s.user_id=$1 AND p.code='paid-test' AND s.status='active' AND s.starts_at<=now()
+	AND NOT EXISTS(SELECT 1 FROM active_trial_users t WHERE t.user_id=s.user_id)`, userID).Scan(&subscriptions); err != nil || subscriptions != 1 {
 		t.Fatalf("expected one subscription, got %d, error %v", subscriptions, err)
 	}
 }

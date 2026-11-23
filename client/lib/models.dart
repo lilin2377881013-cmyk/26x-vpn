@@ -3,7 +3,7 @@ class Account {
     required this.id,
     required this.email,
     required this.status,
-    this.trialCode,
+    this.planCode,
     this.planName,
     this.planTier,
     this.subscriptionEndsAt,
@@ -12,7 +12,7 @@ class Account {
   final String id;
   final String email;
   final String status;
-  final String? trialCode;
+  final String? planCode;
   final String? planName;
   final String? planTier;
   final DateTime? subscriptionEndsAt;
@@ -21,7 +21,7 @@ class Account {
     id: json['id'] as String? ?? '',
     email: json['email'] as String? ?? '',
     status: json['status'] as String? ?? 'unknown',
-    trialCode: json['trialCode'] as String?,
+    planCode: json['planCode'] as String?,
     planName: json['planName'] as String?,
     planTier: json['planTier'] as String?,
     subscriptionEndsAt: DateTime.tryParse(

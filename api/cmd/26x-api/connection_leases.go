@@ -116,7 +116,7 @@ func (s *server) acquireConnectionLease(w http.ResponseWriter, r *http.Request) 
 		FROM subscriptions sub JOIN plans p ON p.id = sub.plan_id
 		WHERE sub.user_id = $1 AND sub.status = 'active' AND sub.starts_at <= now()
 			AND (sub.ends_at IS NULL OR sub.ends_at > now())
-		ORDER BY sub.ends_at DESC NULLS FIRST LIMIT 1`, user.id, unrestricted).Scan(&limit, &subscriptionEnd, &trial)
+		ORDER BY (p.code='trial-15m'), sub.ends_at DESC NULLS FIRST LIMIT 1`, user.id, unrestricted).Scan(&limit, &subscriptionEnd, &trial)
 	if errors.Is(err, sql.ErrNoRows) {
 		writeError(w, http.StatusForbidden, "subscription_required", "An active subscription is required")
 		return

@@ -213,6 +213,11 @@ func (s *server) grantOrderTx(ctx context.Context, tx *sql.Tx, orderNo, serial, 
 	if err := tx.QueryRowContext(ctx, `SELECT id::text FROM users WHERE id=$1 FOR UPDATE`, userID).Scan(&userID); err != nil {
 		return err
 	}
+	// A purchase during the free trial activates the paid plan immediately.
+	if _, err = tx.ExecContext(ctx, `UPDATE subscriptions SET status='expired'
+		WHERE user_id=$1 AND plan_id=(SELECT id FROM plans WHERE code='trial-15m') AND status='active'`, userID); err != nil {
+		return err
+	}
 	var startsAt time.Time
 	err = tx.QueryRowContext(ctx, `SELECT GREATEST(clock_timestamp(), max(ends_at))
 		FROM subscriptions WHERE user_id=$1 AND status='active'`, userID).Scan(&startsAt)

@@ -36,10 +36,8 @@ class ConnectionLease {
 class ApiClient {
   ApiClient({
     String? baseUrl,
-    bool trialSession = false,
     this.requestTimeout = const Duration(seconds: 20),
-  }) : _trialSession = trialSession,
-       _baseUri = Uri.parse(
+  }) : _baseUri = Uri.parse(
          baseUrl ??
              const String.fromEnvironment(
                'API_BASE_URL',
@@ -49,24 +47,11 @@ class ApiClient {
 
   final Duration requestTimeout;
   final Uri _baseUri;
-  final bool _trialSession;
-  ApiClient createTrialClient() => ApiClient(
-    baseUrl: _baseUri.origin,
-    trialSession: true,
-    requestTimeout: requestTimeout,
-  );
   final HttpClient _http = HttpClient()
     ..connectionTimeout = const Duration(seconds: 12);
-  String get _deviceIdKey => _storageKey(
-    account?.trialCode == null
-        ? '26x_device_id/${account?.id ?? ""}'
-        : '26x_trial_device_id',
-  );
-  String get _sessionCookieKey => _storageKey(
-    _trialSession ? '26x_guest_session_cookie' : '26x_session_cookie',
-  );
-  String get _csrfCookieKey =>
-      _storageKey(_trialSession ? '26x_guest_csrf_cookie' : '26x_csrf_cookie');
+  String get _deviceIdKey => _storageKey('26x_device_id/${account?.id ?? ""}');
+  String get _sessionCookieKey => _storageKey('26x_session_cookie');
+  String get _csrfCookieKey => _storageKey('26x_csrf_cookie');
   final FlutterSecureStorage _secureStorage = const FlutterSecureStorage(
     mOptions: MacOsOptions(usesDataProtectionKeychain: false),
   );
@@ -104,74 +89,6 @@ class ApiClient {
     _captureCookies(result.cookies);
     await _persistSession();
     return loadAccount();
-  }
-
-  Future<String>? _trialInstallationLoad;
-
-  Future<String> _trialInstallation() {
-    return _trialInstallationLoad ??= _readTrialInstallation().catchError((
-      Object error,
-    ) {
-      _trialInstallationLoad = null;
-      throw error;
-    });
-  }
-
-  Future<String> _readTrialInstallation() async {
-    final key = _storageKey('26x_trial_installation');
-    var installation = await _secureStorage.read(key: key);
-    if (installation == null) {
-      final random = Random.secure();
-      installation = base64Url
-          .encode(List.generate(32, (_) => random.nextInt(256)))
-          .replaceAll('=', '');
-      await _secureStorage.write(key: key, value: installation);
-    }
-    return installation;
-  }
-
-  Future<({String code, DateTime? endsAt})> identifyTrial(
-    String platform,
-  ) async {
-    final result = await _request(
-      'POST',
-      '/api/v1/auth/trial',
-      stage: '读取游客识别码 [API-TRIAL-ID]',
-      body: {
-        'installation': await _trialInstallation(),
-        'platform': platform,
-        'identifyOnly': true,
-      },
-    );
-    if (result.statusCode != HttpStatus.ok) {
-      throw ApiException(_errorMessage(result.body, '无法读取试用识别码'));
-    }
-    final json = _decode(result.body);
-    return (
-      code: json['code'] as String,
-      endsAt: DateTime.tryParse(json['endsAt'] as String? ?? ''),
-    );
-  }
-
-  Future<({Account account, Device device})> startTrial(String platform) async {
-    final installation = await _trialInstallation();
-    final result = await _request(
-      'POST',
-      '/api/v1/auth/trial',
-      body: {'installation': installation, 'platform': platform},
-    );
-    if (result.statusCode != HttpStatus.created) {
-      throw ApiException(_errorMessage(result.body, '试用暂未开放'));
-    }
-    final trial = await loadAccount();
-    final registered = (await devices()).firstOrNull;
-    if (registered == null) {
-      throw const ApiException('找不到试用设备，请稍后重试。');
-    }
-    await rememberLocalDevice(registered.id);
-    unawaited(syncDeviceSystem(registered.id));
-    await _persistSession();
-    return (account: trial, device: registered);
   }
 
   Future<String> sendSupportMessage(String message) async {
@@ -363,12 +280,8 @@ class ApiClient {
       key: _deviceIdKey,
     );
     if (registered != null) return registered;
-    if (account?.trialCode == null) {
-      final legacy = await _secureStorage.read(
-        key: _storageKey('26x_device_id'),
-      );
-      if (legacy != null) return legacy;
-    }
+    final legacy = await _secureStorage.read(key: _storageKey('26x_device_id'));
+    if (legacy != null) return legacy;
     const testDevice = String.fromEnvironment('VPN_TEST_DEVICE_ID');
     return kDebugMode && testDevice.isNotEmpty ? testDevice : null;
   }

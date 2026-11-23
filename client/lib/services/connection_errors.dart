@@ -15,7 +15,6 @@ String apiRequestStage(String method, String path) {
     return method == 'DELETE' ? '退出账号 [API-SIGNOUT]' : '账号登录 [API-AUTH]';
   }
   if (path == '/api/v1/auth/register') return '注册账号 [API-REGISTER]';
-  if (path == '/api/v1/auth/trial') return '启动试用 [API-TRIAL-START]';
   if (path.endsWith('/devices')) return '登录设备 [API-DEVICES]';
   return '账号服务 [API-ACCOUNT]';
 }

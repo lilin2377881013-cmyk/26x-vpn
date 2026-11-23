@@ -38,12 +38,25 @@ func (s *server) registerAccount(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "registration_failed", "注册失败，请稍后再试")
 		return
 	}
+	tx, err := s.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "registration_failed", "注册失败，请稍后再试")
+		return
+	}
+	defer tx.Rollback()
 	var id string
-	err = s.db.QueryRowContext(r.Context(), `INSERT INTO users(email,password_hash) VALUES($1,$2)
+	err = tx.QueryRowContext(r.Context(), `INSERT INTO users(email,password_hash) VALUES($1,$2)
 		ON CONFLICT (email) DO NOTHING RETURNING id::text`, email, hash).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
 		writeError(w, http.StatusConflict, "email_registered", "此邮箱已注册，请登录")
 		return
+	}
+	if err == nil {
+		_, err = tx.ExecContext(r.Context(), `INSERT INTO subscriptions(user_id,plan_id,status,starts_at,ends_at)
+			VALUES ($1,(SELECT id FROM plans WHERE code='trial-15m'),'active',now(),now()+interval '15 minutes')`, id)
+	}
+	if err == nil {
+		err = tx.Commit()
 	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "registration_failed", "注册失败，请稍后再试")

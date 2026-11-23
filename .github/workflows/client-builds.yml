@@ -41,7 +41,7 @@ jobs:
           (cd work/libXray-v26.11.9 && go build -mod=readonly -trimpath -o ../26x-test-relay.exe github.com/xtls/xray-core/main)
       - name: Build Windows client
         working-directory: client
-        run: flutter build windows --release --build-name=0.1.12 --build-number=28 --dart-define=API_BASE_URL=https://26xvpn.com
+        run: flutter build windows --release --build-name=0.1.13 --build-number=29 --dart-define=API_BASE_URL=https://26xvpn.com
       - name: Include Wintun license
         shell: bash
         run: cp wintun/LICENSE.txt client/build/windows/x64/runner/Release/
@@ -63,7 +63,7 @@ jobs:
         with:
           name: 26x-Windows-x64
           path: |
-            client/windows/26x-VPN-0.1.12-Setup-x64.exe
+            client/windows/26x-VPN-0.1.13-Setup-x64.exe
             client/windows/windows-package-report.json
             client/windows/windows-icon-preview.png
           if-no-files-found: error

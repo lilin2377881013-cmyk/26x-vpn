@@ -115,7 +115,7 @@ func enrollDevice(ctx context.Context, tx *sql.Tx, current actor, platform, labe
 				(SELECT CASE WHEN p.code='trial-15m' THEN 1 WHEN p.tier='premium' THEN 6 ELSE 3 END
 				 FROM subscriptions s JOIN plans p ON p.id=s.plan_id WHERE s.user_id=$1 AND s.status='active'
 				 AND s.starts_at<=now() AND (s.ends_at IS NULL OR s.ends_at>now())
-				 ORDER BY s.ends_at DESC NULLS FIRST LIMIT 1),3)`, current.id)
+				 ORDER BY (p.code='trial-15m'), s.ends_at DESC NULLS FIRST LIMIT 1),3)`, current.id)
 		if err != nil {
 			return "", false, err
 		}

@@ -29,7 +29,6 @@ type server struct {
 	cfg                 config
 	logger              *slog.Logger
 	limiter             *loginLimiter
-	trialLimiter        *loginLimiter
 	registrationLimiter *loginLimiter
 	hashSlots           chan struct{}
 }
@@ -55,7 +54,7 @@ type loginWindow struct {
 }
 
 func newServer(db *sql.DB, cfg config, logger *slog.Logger) *server {
-	return &server{db: db, cfg: cfg, logger: logger, limiter: &loginLimiter{entries: make(map[string]loginWindow)}, trialLimiter: &loginLimiter{entries: make(map[string]loginWindow)}, registrationLimiter: &loginLimiter{entries: make(map[string]loginWindow)}, hashSlots: make(chan struct{}, 4)}
+	return &server{db: db, cfg: cfg, logger: logger, limiter: &loginLimiter{entries: make(map[string]loginWindow)}, registrationLimiter: &loginLimiter{entries: make(map[string]loginWindow)}, hashSlots: make(chan struct{}, 4)}
 }
 
 func (s *server) hashPassword(password string) (string, error) {
@@ -93,7 +92,7 @@ func (s *server) routes() http.Handler {
 	mux.HandleFunc("PUT /api/v1/admin/downloads/{channel}", s.requireAdmin(s.withCSRF(s.saveDownloads), "owner", "operations"))
 	mux.HandleFunc("POST /api/v1/auth/session", s.userLogin)
 	mux.HandleFunc("POST /api/v1/auth/register", s.registerAccount)
-	mux.HandleFunc("POST /api/v1/auth/trial", s.startTrial)
+	mux.HandleFunc("POST /api/v1/auth/trial", registrationRequired)
 	mux.HandleFunc("POST /api/v1/me/checkout", s.requireUser(s.withUserCSRF(s.checkout)))
 	mux.HandleFunc("POST "+paymentNotifyPath, s.paymentNotify)
 	mux.HandleFunc("GET "+cashierPath+"{token}", s.cashierPage)
@@ -323,6 +322,7 @@ func (s *server) authenticate(r *http.Request, kind string) (actor, error) {
 		LEFT JOIN devices d ON d.id=s.device_id
 		LEFT JOIN admin_accounts a ON s.actor_kind = 'admin' AND a.id = s.actor_id AND a.disabled_at IS NULL
 		LEFT JOIN users u ON s.actor_kind = 'user' AND u.id = s.actor_id AND u.status = 'active'
+			AND NOT EXISTS (SELECT 1 FROM trial_accounts g WHERE g.user_id=u.id)
 		WHERE s.token_hash = $1 AND s.actor_kind = $2 AND s.revoked_at IS NULL AND (s.expires_at IS NULL OR s.expires_at > now())
 		AND (s.device_id IS NULL OR (d.revoked_at IS NULL AND d.user_id=s.actor_id))
 		AND ((s.actor_kind = 'admin' AND a.id IS NOT NULL) OR (s.actor_kind = 'user' AND u.id IS NOT NULL))`, tokenHash[:], kind).Scan(&current.sessionID, &current.id, &current.kind, &current.csrf, &channel, &current.deviceID, &current.role)
@@ -416,26 +416,30 @@ func (s *server) adminMe(w http.ResponseWriter, r *http.Request) {
 func (s *server) userMe(w http.ResponseWriter, r *http.Request) {
 	current := actorFromContext(r)
 	var email, status string
-	var planName, planTier, trialCode sql.NullString
+	var planName, planTier, planCode sql.NullString
 	var endsAt sql.NullTime
-	err := s.db.QueryRowContext(r.Context(), `SELECT u.email::text, u.status, current.name, current.tier,
+	err := s.db.QueryRowContext(r.Context(), `SELECT u.email::text, u.status, current.name, current.tier, current.code,
+		CASE WHEN current.code='trial-15m' THEN current.ends_at ELSE
 		(SELECT upper(period) FROM unnest((SELECT range_agg(tstzrange(starts_at,ends_at,'[)'))
-		 FROM subscriptions WHERE user_id=u.id AND status='active' AND starts_at IS NOT NULL)) AS period WHERE period @> now()),
-		(SELECT code FROM trial_accounts WHERE user_id=u.id)
+		 FROM subscriptions WHERE user_id=u.id AND status='active' AND starts_at IS NOT NULL)) AS period WHERE period @> now()) END
 		FROM users u LEFT JOIN LATERAL (
-		 SELECT p.name, p.tier FROM subscriptions sub JOIN plans p ON p.id=sub.plan_id
+		 SELECT p.name, p.tier, p.code, sub.ends_at FROM subscriptions sub JOIN plans p ON p.id=sub.plan_id
 		 WHERE sub.user_id=u.id AND sub.status='active' AND sub.starts_at<=now()
-		 AND (sub.ends_at IS NULL OR sub.ends_at>now()) ORDER BY sub.ends_at DESC NULLS FIRST LIMIT 1
-		) current ON true WHERE u.id=$1`, current.id).Scan(&email, &status, &planName, &planTier, &endsAt, &trialCode)
+		 AND (sub.ends_at IS NULL OR sub.ends_at>now()) ORDER BY (p.code='trial-15m'), sub.ends_at DESC NULLS FIRST LIMIT 1
+		) current ON true WHERE u.id=$1`, current.id).Scan(&email, &status, &planName, &planTier, &planCode, &endsAt)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Unable to read account")
 		return
 	}
 	var subscriptionEnds any
 	if endsAt.Valid {
-		subscriptionEnds = endsAt.Time.UTC().Format(time.RFC3339)
+		format := time.RFC3339
+		if planCode.String == "trial-15m" {
+			format = time.RFC3339Nano
+		}
+		subscriptionEnds = endsAt.Time.UTC().Format(format)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"id": current.id, "email": email, "status": status, "trialCode": nullableString(trialCode), "planName": nullableString(planName), "planTier": nullableString(planTier), "subscriptionEndsAt": subscriptionEnds, "csrfToken": current.csrf})
+	writeJSON(w, http.StatusOK, map[string]any{"id": current.id, "email": email, "status": status, "planCode": nullableString(planCode), "planName": nullableString(planName), "planTier": nullableString(planTier), "subscriptionEndsAt": subscriptionEnds, "csrfToken": current.csrf})
 }
 
 func (s *server) listAvailablePlans(w http.ResponseWriter, r *http.Request) {
@@ -672,14 +676,14 @@ func (s *server) writeClientNodes(w http.ResponseWriter, r *http.Request, rawDev
 		FROM nodes n JOIN node_endpoints e ON e.node_id = n.id AND e.enabled = TRUE
 		JOIN devices d ON d.id = $1 AND d.user_id = $2 AND d.revoked_at IS NULL
 		LEFT JOIN device_node_credentials c ON c.device_id = d.id AND c.endpoint_id = e.id AND c.revoked_at IS NULL
-			AND CASE WHEN EXISTS (SELECT 1 FROM trial_accounts t WHERE t.user_id=$2)
+			AND CASE WHEN EXISTS (SELECT 1 FROM active_trial_users t WHERE t.user_id=$2)
             THEN EXISTS (SELECT 1 FROM connection_leases l WHERE l.device_id=d.id
                          AND l.endpoint_id=e.id AND l.expires_at>now())
             ELSE (NOT $3 AND e.id=$4::uuid) OR NOT c.managed OR EXISTS (
               SELECT 1 FROM connection_leases l WHERE l.device_id=d.id AND l.expires_at>now()
             ) END
 		WHERE n.status IN ('online', 'degraded')
-		AND CASE WHEN EXISTS(SELECT 1 FROM trial_accounts WHERE user_id=$2)
+		AND CASE WHEN EXISTS(SELECT 1 FROM active_trial_users WHERE user_id=$2)
 			THEN n.code<>'hk-01' AND UPPER(n.region_code)='HK' AND e.protocol='vless_reality'
                  AND NOT EXISTS (SELECT 1 FROM connection_leases l WHERE l.device_id=d.id
                                  AND l.expires_at>now() AND l.endpoint_id IS DISTINCT FROM e.id)
@@ -740,7 +744,7 @@ func (s *server) writeClientNodes(w http.ResponseWriter, r *http.Request, rawDev
 		return
 	}
 	var trial bool
-	if err := s.db.QueryRowContext(r.Context(), `SELECT EXISTS(SELECT 1 FROM trial_accounts WHERE user_id=$1)`, current.id).Scan(&trial); err != nil {
+	if err := s.db.QueryRowContext(r.Context(), `SELECT EXISTS(SELECT 1 FROM active_trial_users WHERE user_id=$1)`, current.id).Scan(&trial); err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Unable to check trial access")
 		return
 	}

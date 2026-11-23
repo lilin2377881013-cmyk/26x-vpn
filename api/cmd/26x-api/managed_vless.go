@@ -63,6 +63,10 @@ func (s *server) syncManagedCredentials(ctx context.Context) {
 
 const eligibleDevice = `d.revoked_at IS NULL AND u.status = 'active'
 	AND e.enabled AND n.status IN ('online', 'degraded')
+	AND (NOT EXISTS (SELECT 1 FROM active_trial_users t WHERE t.user_id=u.id) OR
+		(UPPER(n.region_code)='HK' AND n.code<>'hk-01' AND EXISTS (
+			SELECT 1 FROM connection_leases l WHERE l.device_id=d.id AND l.endpoint_id=e.id AND l.expires_at>now()
+		)))
 	AND EXISTS (
 		SELECT 1 FROM subscriptions s WHERE s.user_id = u.id AND s.status = 'active'
 		AND s.starts_at <= now() AND (s.ends_at IS NULL OR s.ends_at > now())
@@ -76,7 +80,7 @@ func (s *server) queueManagedCredentials(ctx context.Context) error {
 		LEFT JOIN device_node_credentials c ON c.device_id = d.id AND c.endpoint_id = e.id
 		WHERE (`+eligibleDevice+`) AND (c.id IS NULL OR c.managed AND c.status = 'revoked')
 		AND (NOT $2 OR EXISTS (SELECT 1 FROM connection_leases l WHERE l.device_id = d.id AND l.expires_at > now()))
-		AND (NOT $3 OR EXISTS(SELECT 1 FROM trial_accounts WHERE user_id=d.user_id))
+		AND (NOT $3 OR EXISTS(SELECT 1 FROM active_trial_users WHERE user_id=d.user_id))
 		ORDER BY d.created_at, d.id LIMIT 32`, endpoint, s.nodeRequiresLease(), s.cfg.managedVLESS.trialOnly)
 	if err != nil {
 		return err
@@ -142,19 +146,19 @@ func (s *server) reconcileManagedCredential(ctx context.Context) (bool, error) {
 	}
 	defer tx.Rollback()
 	var id, device, status, version string
-	var eligible bool
+	var eligible, trial bool
 	var sealed []byte
 	var leaseExpires sql.NullTime
 	err = tx.QueryRowContext(ctx, `SELECT c.id::text, d.id::text, c.status, c.key_version, c.credential_ciphertext,
 		COALESCE((`+eligibleDevice+`), FALSE),
-		l.expires_at
+		EXISTS(SELECT 1 FROM active_trial_users WHERE user_id=d.user_id), l.expires_at
 		FROM device_node_credentials c JOIN devices d ON d.id = c.device_id JOIN users u ON u.id = d.user_id
 		JOIN node_endpoints e ON e.id = c.endpoint_id JOIN nodes n ON n.id = e.node_id
 		LEFT JOIN connection_leases l ON l.device_id=d.id AND l.expires_at > now()
 		WHERE c.managed AND c.endpoint_id = $1 AND c.status IN ('pending','active','revoking')
 			AND c.reconcile_after <= now()
 		ORDER BY c.reconcile_after, c.id LIMIT 1 FOR UPDATE OF c SKIP LOCKED`, s.cfg.managedVLESS.endpoint).
-		Scan(&id, &device, &status, &version, &sealed, &eligible, &leaseExpires)
+		Scan(&id, &device, &status, &version, &sealed, &eligible, &trial, &leaseExpires)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
@@ -162,7 +166,7 @@ func (s *server) reconcileManagedCredential(ctx context.Context) (bool, error) {
 		return false, err
 	}
 	next := "active"
-	requiresLease := s.nodeRequiresLease()
+	requiresLease := trial || s.nodeRequiresLease()
 	eligible = eligible && (!requiresLease || leaseExpires.Valid && time.Now().Before(leaseExpires.Time))
 	if !requiresLease {
 		leaseExpires = sql.NullTime{}

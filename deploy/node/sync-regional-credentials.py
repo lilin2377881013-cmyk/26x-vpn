@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Install and revoke runtime VLESS credentials for regional paid accounts."""
+"""Install and revoke runtime VLESS credentials for regional VPN accounts."""
 import base64
 import json
 import os
@@ -28,13 +28,13 @@ def main():
         AND e.enabled AND n.status IN ('online','degraded') AND EXISTS (
             SELECT 1 FROM subscriptions s WHERE s.user_id=u.id AND s.status='active'
             AND s.starts_at<=now() AND (s.ends_at IS NULL OR s.ends_at>now())
-        ) AND (NOT EXISTS (SELECT 1 FROM trial_accounts t WHERE t.user_id=u.id)
+        ) AND (NOT EXISTS (SELECT 1 FROM active_trial_users t WHERE t.user_id=u.id)
                OR (UPPER(n.region_code)='HK' AND lease.expires_at>now()))"""
     rows = json.loads(sql(f"""
         SELECT COALESCE(json_agg(selection),'[]') FROM (
             SELECT n.code, e.port, e.id AS endpoint, d.id AS device, c.id AS id, c.status,
                    encode(c.credential_ciphertext, 'hex') AS cipher, COALESCE(({eligible}),FALSE) AS eligible,
-                   EXISTS (SELECT 1 FROM trial_accounts t WHERE t.user_id=u.id) AS trial
+                   EXISTS (SELECT 1 FROM active_trial_users t WHERE t.user_id=u.id) AS trial
             FROM devices d JOIN users u ON u.id=d.user_id
             CROSS JOIN node_endpoints e JOIN nodes n ON n.id=e.node_id
             LEFT JOIN device_node_credentials c ON c.device_id=d.id AND c.endpoint_id=e.id

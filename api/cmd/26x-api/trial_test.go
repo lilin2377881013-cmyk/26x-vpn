@@ -3,8 +3,8 @@ package main
 import (
 	"context"
 	"database/sql"
-	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -15,7 +15,7 @@ import (
 	"time"
 )
 
-func TestTrialIdentityAndFixedExpiration(t *testing.T) {
+func TestRegistrationGrantsOneFixedTrial(t *testing.T) {
 	dsn := os.Getenv("DEVICE_TEST_DATABASE_URL")
 	if dsn == "" {
 		t.Skip("DEVICE_TEST_DATABASE_URL must point to an empty test database")
@@ -38,71 +38,92 @@ func TestTrialIdentityAndFixedExpiration(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := newServer(db, config{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
-	installation := base64.RawURLEncoding.EncodeToString(make([]byte, 32))
-	request := func(identify bool) *httptest.ResponseRecorder {
-		input, _ := json.Marshal(map[string]any{"installation": installation, "platform": "macos", "identifyOnly": identify})
-		req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/trial", strings.NewReader(string(input)))
-		req.Header.Set("Content-Type", "application/json")
-		w := httptest.NewRecorder()
-		s.startTrial(w, req)
-		return w
-	}
-	readIdentity := func() (string, string) {
+	mux := s.routes()
+	call := func(method, path, body string, cookies []*http.Cookie, want int) map[string]any {
 		t.Helper()
-		w := request(true)
-		var identity struct{ Code, EndsAt string }
-		if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &identity) != nil || len(w.Result().Cookies()) != 0 || identity.Code == "" {
-			t.Fatalf("bad identity response: %d %s", w.Code, w.Body.String())
+		r := httptest.NewRequest(method, path, strings.NewReader(body))
+		r.Header.Set("Content-Type", "application/json")
+		for _, c := range cookies {
+			r.AddCookie(c)
+			if c.Name == csrfCookie {
+				r.Header.Set("X-CSRF-Token", c.Value)
+			}
 		}
-		return identity.Code, identity.EndsAt
-	}
-	code, ends := readIdentity()
-	if ends != "" {
-		t.Fatal("looking up code started the trial")
-	}
-	if w := request(false); w.Code != 201 {
-		t.Fatalf("trial failed: %d %s", w.Code, w.Body.String())
-	}
-	var user, device string
-	if err := db.QueryRow(`SELECT t.user_id::text,d.id::text FROM trial_accounts t JOIN devices d ON d.user_id=t.user_id WHERE t.code=$1`, code).Scan(&user, &device); err != nil {
-		t.Fatal(err)
-	}
-	requestLease := func(body string) *httptest.ResponseRecorder {
-		req := httptest.NewRequest(http.MethodPut, "/", strings.NewReader(body))
-		req.Header.Set("Content-Type", "application/json")
-		req.SetPathValue("id", device)
 		w := httptest.NewRecorder()
-		s.acquireConnectionLease(w, req.WithContext(contextWithActor(req, actor{id: user})))
-		return w
+		mux.ServeHTTP(w, r)
+		if w.Code != want {
+			t.Fatalf("%s %s: want %d got %d %s", method, path, want, w.Code, w.Body)
+		}
+		var data map[string]any
+		if err := json.Unmarshal(w.Body.Bytes(), &data); err != nil {
+			t.Fatal(err)
+		}
+		data["cookies"] = w.Result().Cookies()
+		return data
 	}
-	if w := requestLease(`{"region":"JP"}`); w.Code != http.StatusForbidden {
-		t.Fatalf("trial picked a different region: %d %s", w.Code, w.Body.String())
+	details := `{"email":"registered-trial@example.test","password":"a-valid-test-password"}`
+	for _, body := range []string{`{"identifyOnly":true}`, `{}`} {
+		retired := call("POST", "/api/v1/auth/trial", body, nil, 403)
+		if len(retired["cookies"].([]*http.Cookie)) != 0 {
+			t.Fatal("anonymous session issued")
+		}
 	}
-	w := requestLease(`{}`)
-	var lease struct{ EndpointID, Token string }
-	if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &lease) != nil || lease.EndpointID != endpoint {
-		t.Fatalf("legacy trial client did not reserve regional HK: %d %s", w.Code, w.Body.String())
+	call("GET", "/api/v1/nodes?deviceId=00000000-0000-0000-0000-000000000001", "", nil, 401)
+	reg := call("POST", "/api/v1/auth/register", details, nil, 201)
+	cookies := reg["cookies"].([]*http.Cookie)
+	me := call("GET", "/api/v1/me", "", cookies, 200)
+	if me["planCode"] != "trial-15m" || me["email"] != "registered-trial@example.test" {
+		t.Fatal(me["planCode"], me["email"])
 	}
-	body, _ := json.Marshal(map[string]string{"token": lease.Token})
-	if w := requestLease(string(body)); w.Code != http.StatusOK {
-		t.Fatalf("HK trial lease could not renew: %d %s", w.Code, w.Body.String())
+	if _, ok := me["trialCode"]; ok {
+		t.Fatal("guest identity exposed")
 	}
-	current, ends := readIdentity()
-	expiry, err := time.Parse(time.RFC3339, ends)
-	if current != code || err != nil || time.Until(expiry) < 14*time.Minute || time.Until(expiry) > 15*time.Minute {
-		t.Fatalf("unexpected trial code or deadline %q %q", current, ends)
+	expiry, err := time.Parse(time.RFC3339, me["subscriptionEndsAt"].(string))
+	if err != nil || time.Until(expiry) < 14*time.Minute || time.Until(expiry) > 15*time.Minute {
+		t.Fatal("bad deadline", expiry)
 	}
-	if w := request(false); w.Code != 201 {
-		t.Fatalf("trial could not resume: %d %s", w.Code, w.Body.String())
+	enroll := func(c []*http.Cookie, sequence int) string {
+		return call("POST", "/api/v1/me/devices", fmt.Sprintf(`{"platform":"macos","label":"test","installationToken":"%032d"}`, sequence), c, 201)["id"].(string)
 	}
-	if _, resumedUntil := readIdentity(); resumedUntil != ends {
-		t.Fatal("resuming extended the trial")
+	device := enroll(cookies, 1)
+	leasePath := "/api/v1/me/devices/" + device + "/connection-lease"
+	call("PUT", leasePath, `{"region":"JP"}`, cookies, 403)
+	l := call("PUT", leasePath, `{}`, cookies, 200)
+	if l["endpointId"] != endpoint {
+		t.Fatal("wrong regional trial assignment")
 	}
-	if _, err := db.Exec(`UPDATE subscriptions SET starts_at=now()-interval '16 minutes',ends_at=now()-interval '1 minute'
-		WHERE user_id=(SELECT user_id FROM trial_accounts WHERE code=$1)`, code); err != nil {
+	nodes := call("GET", "/api/v1/nodes?deviceId="+device, "", cookies, 200)
+	if len(nodes["items"].([]any)) == 0 {
+		t.Fatal("missing trial node")
+	}
+	for _, n := range nodes["items"].([]any) {
+		if n.(map[string]any)["region"] != "HK" {
+			t.Fatal("trial has non-HK endpoint")
+		}
+	}
+	call("POST", "/api/v1/auth/register", details, nil, 409)
+	second := call("POST", "/api/v1/auth/session", details, nil, 201)["cookies"].([]*http.Cookie)
+	other := enroll(second, 2)
+	if device == other {
+		t.Fatal("test requires distinct installations")
+	}
+	again := call("GET", "/api/v1/me", "", second, 200)
+	if again["subscriptionEndsAt"] != me["subscriptionEndsAt"] {
+		t.Fatal("new login extended trial")
+	}
+	var count int
+	if err := db.QueryRow("SELECT count(*) FROM subscriptions WHERE user_id=$1", me["id"]).Scan(&count); err != nil || count != 1 {
+		t.Fatal("trial count", count, err)
+	}
+	if _, err := db.Exec(`UPDATE subscriptions SET starts_at=now()-interval '16 minutes',ends_at=now()-interval '1 minute' WHERE user_id=$1`, me["id"]); err != nil {
 		t.Fatal(err)
 	}
-	if w := request(false); w.Code != http.StatusGone {
-		t.Fatalf("expired trial restarted: %d %s", w.Code, w.Body.String())
+	call("PUT", "/api/v1/me/devices/"+other+"/connection-lease", `{}`, second, 403)
+	if call("GET", "/api/v1/me", "", second, 200)["planCode"] != nil {
+		t.Fatal("expired trial still active")
+	}
+	third := call("POST", "/api/v1/auth/session", details, nil, 201)["cookies"].([]*http.Cookie)
+	if call("GET", "/api/v1/me", "", third, 200)["planCode"] != nil {
+		t.Fatal("login restarted expired trial")
 	}
 }

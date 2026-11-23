@@ -36,7 +36,7 @@ func (s *server) userAuthError(w http.ResponseWriter, err error) {
 }
 
 // verifiedHash is the credential checked by login or written by registration.
-// Admin logins and installation-based guest trials keep their bounded sessions.
+// Admin logins keep their bounded sessions.
 func (s *server) issueSession(w http.ResponseWriter, r *http.Request, current actor, verifiedHash string) {
 	token, err := randomToken(32)
 	if err != nil {

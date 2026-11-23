@@ -85,9 +85,6 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _restoreOnStartup() async {
     try {
       await _restoreAccount();
-      if (mounted && !_hasMembership) {
-        unawaited(_identifyInstallation().catchError((Object _) {}));
-      }
     } catch (error) {
       _message = error.toString();
     } finally {
@@ -101,8 +98,8 @@ class _HomeScreenState extends State<HomeScreen> {
         : null;
     if (!mounted) return;
     _sessionUnresolved = false;
-    if (restored != null && restored.trialCode == null) {
-      _account = restored;
+    if (restored != null) {
+      _setAccount(restored);
       await _loadDevices();
     }
   }
@@ -110,7 +107,6 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void dispose() {
     _trialTimer?.cancel();
-    _trialApi.close();
     _renewal?.cancel();
     _leaseExpiry?.cancel();
     unawaited(_tunnelSubscription?.cancel() ?? Future<void>.value());
@@ -121,64 +117,61 @@ class _HomeScreenState extends State<HomeScreen> {
 
   bool _registering = false;
   bool _authRequested = false;
-  late final ApiClient _trialApi = widget.api.createTrialClient();
-  String? _installationCode;
-  DateTime? _trialEndsAt;
-  Device? _trialDevice;
-  ApiClient? _leaseApi;
+  bool _connectAfterAuth = false;
   Stopwatch? _leaseAge;
   Duration _leaseRemaining = Duration.zero;
   Timer? _trialTimer;
 
-  bool get _hasMembership => _account?.planTier != null;
-  bool get _trialExpired => _trialEndsAt?.isAfter(DateTime.now()) == false;
+  bool get _trialPlan => _account?.planCode == 'trial-15m';
   bool get _usingTrial =>
-      !_hasMembership && _trialDevice != null && !_trialExpired;
-  ApiClient get _vpnApi => _usingTrial ? _trialApi : widget.api;
-  Device? get _connectionDevice => _usingTrial ? _trialDevice : _device;
+      _trialPlan &&
+      _trialTimer?.isActive == true &&
+      (_account?.subscriptionEndsAt?.isAfter(DateTime.now()) ?? false);
+  bool get _canConnect => _trialPlan ? _usingTrial : _account?.planTier != null;
 
-  void _requestAuthentication({bool purchasing = false}) {
+  void _requestAuthentication({
+    bool purchasing = false,
+    bool connecting = false,
+  }) {
     setState(() {
       _tab = 2;
+      _connectAfterAuth = connecting;
       _authRequested = true;
-      _registering = false;
+      _registering = connecting;
       _message = purchasing ? '请先注册或登录，再开通会员。' : null;
     });
   }
 
-  void _updateTrial(String code, DateTime? endsAt) {
+  void _setAccount(Account? account) {
+    final previous = _account;
     _trialTimer?.cancel();
-    _installationCode = code;
-    _trialEndsAt = endsAt;
-    if (endsAt != null && !_trialExpired) {
-      _trialTimer = Timer(endsAt.difference(DateTime.now()), () async {
-        if (!mounted) return;
-        if (_leaseApi == _trialApi) {
-          await widget.tunnel.disconnect();
-          await _releaseLease();
-        }
-        if (!mounted) return;
-        setState(() {
-          _trialDevice = null;
-          if (!_hasMembership) {
-            _nodes = [];
-            _selectedNode = null;
-            _message = '15 分钟试用已结束。';
-          }
-        });
-      });
+    _account = account;
+    if (account == null) return;
+    if (_trialPlan && account.subscriptionEndsAt != null) {
+      _trialTimer = Timer(
+        account.subscriptionEndsAt!.difference(DateTime.now()),
+        () => unawaited(_endTrial(account)),
+      );
+    } else if (previous?.planCode == 'trial-15m' &&
+        previous?.id == account.id &&
+        account.planTier == null) {
+      unawaited(_endTrial(account));
     }
   }
 
-  Future<void> _identifyInstallation() async {
-    final identity = await _trialApi.identifyTrial(_platform);
-    if (mounted) {
-      setState(() {
-        if (_trialDevice == null &&
-            (identity.endsAt != null || _trialEndsAt == null)) {
-          _updateTrial(identity.code, identity.endsAt);
-        }
-      });
+  Future<void> _endTrial(Account account) async {
+    if (!mounted || !identical(account, _account)) return;
+    setState(() {
+      _nodes = [];
+      _selectedNode = null;
+      _message = '15 分钟试用已结束，可开通会员继续使用。';
+    });
+    if (_lease != null || _isConnected) {
+      _leaseInvalid = true;
+      await widget.tunnel.disconnect();
+      if (widget.tunnel.current.state == TunnelState.disconnected) {
+        await _releaseLease();
+      }
     }
   }
 
@@ -187,19 +180,20 @@ class _HomeScreenState extends State<HomeScreen> {
       _busy = true;
       _message = null;
     });
+    var resumeConnection = false;
     try {
-      _account = _registering
+      final account = _registering
           ? await widget.api.register(_email.text, _password.text)
           : await widget.api.signIn(_email.text, _password.text);
-      if (_hasMembership && _leaseApi == _trialApi) {
-        await widget.tunnel.disconnect();
-        await _releaseLease();
-        _selectedNode = null;
-      }
+      if (!mounted) return;
+      _setAccount(account);
       await _loadDevices();
       unawaited(_loadPlans());
       if (mounted) {
         setState(() {
+          resumeConnection = _connectAfterAuth && _tab == 2;
+          _connectAfterAuth = false;
+          if (resumeConnection) _tab = 0;
           _password.clear();
           _registering = false;
           _authRequested = false;
@@ -210,37 +204,9 @@ class _HomeScreenState extends State<HomeScreen> {
     } finally {
       if (mounted) setState(() => _busy = false);
     }
-  }
-
-  Future<void> _startTrial() async {
-    if (_trialExpired) {
-      setState(() => _message = '15 分钟试用已结束，请注册或登录后开通会员。');
-      return;
+    if (mounted && resumeConnection && !_isConnected) {
+      await _runButtonAction(TunnelState.connecting, _toggleTunnel);
     }
-    setState(() {
-      _tab = 0;
-      _busy = true;
-      _message = null;
-    });
-    try {
-      final trial = await _trialApi
-          .startTrial(_platform)
-          .timeout(const Duration(seconds: 20));
-      if (!mounted) return;
-      final end = trial.account.subscriptionEndsAt;
-      if (end == null || !end.isAfter(DateTime.now())) {
-        throw const ApiException('15 分钟试用已结束。');
-      }
-      _updateTrial(trial.account.trialCode ?? _installationCode ?? '', end);
-      _trialDevice = trial.device;
-      await _loadNodes();
-    } catch (error) {
-      if (mounted) setState(() => _message = error.toString());
-      return;
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
-    if (mounted) await _connectTo(_selectedNode);
   }
 
   Future<void> _checkout(VpnPlan plan) async {
@@ -285,7 +251,7 @@ class _HomeScreenState extends State<HomeScreen> {
         break;
       }
     }
-    if (_device case final Device device when _account?.trialCode == null) {
+    if (_device case final Device device) {
       await widget.api.rememberLocalDevice(device.id);
       if (device.label == _deviceLabel) {
         final model = await _deviceModel();
@@ -308,7 +274,7 @@ class _HomeScreenState extends State<HomeScreen> {
         }
       }
     }
-    if (_device == null && _account?.trialCode == null) {
+    if (_device == null && _account != null) {
       try {
         final device = await widget.api.registerDevice(
           platform: _platform,
@@ -325,7 +291,7 @@ class _HomeScreenState extends State<HomeScreen> {
     }
     final device = _device;
     if (device != null) unawaited(widget.api.syncDeviceSystem(device.id));
-    if (_connectionDevice != null && (_hasMembership || _usingTrial)) {
+    if (_device != null && _canConnect) {
       await _loadNodes();
     } else {
       _nodes = [];
@@ -335,10 +301,10 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _loadNodes() async {
-    final api = _vpnApi;
-    final deviceId = _connectionDevice?.id;
+    final api = widget.api;
+    final deviceId = _device?.id;
     final nodes = await api.loadNodes(deviceId: deviceId);
-    if (!mounted || api != _vpnApi || deviceId != _connectionDevice?.id) return;
+    if (!mounted || api != widget.api || deviceId != _device?.id) return;
     final previous = _nodesDeviceId == deviceId && _nodesApi == api
         ? _selectedNode
         : null;
@@ -379,18 +345,16 @@ class _HomeScreenState extends State<HomeScreen> {
           _leaseExpiry?.cancel();
           _leaseInvalid = true;
           _lease = null;
-          _leaseApi = null;
-          _account = null;
+          _setAccount(null);
           _authRequested = false;
           _devices = [];
           _nodes = [];
           _device = null;
           _deviceEnrollmentFailed = false;
-          _trialDevice = null;
+          _connectAfterAuth = false;
           _selectedNode = null;
           _message = signOutError;
         });
-        unawaited(_identifyInstallation().catchError((Object _) {}));
       }
     }
   }
@@ -510,7 +474,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         if (mounted) {
                           setState(() {
                             _tab = 0;
-                            _account = null;
+                            _setAccount(null);
                             _devices = [];
                             _nodes = [];
                             _device = null;
@@ -642,7 +606,9 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           const SizedBox(height: 8),
           Text(
-            _registering ? '填写邮箱并设置至少 12 位的密码。' : '登录、注册或开始免费试用。',
+            _registering
+                ? '注册成功即开始 15 分钟免费试用。请使用至少 12 位的密码。'
+                : '登录已有账户，或注册新账号免费试用 15 分钟。',
             style: const TextStyle(color: Color(0xFFAAB6C6), height: 1.5),
           ),
           const SizedBox(height: 26),
@@ -717,6 +683,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   ? null
                   : () => setState(() {
                       _authRequested = false;
+                      _connectAfterAuth = false;
                       _message = null;
                     }),
               child: const Text('返回个人中心'),
@@ -1043,65 +1010,24 @@ class _HomeScreenState extends State<HomeScreen> {
     ],
   );
 
-  Widget _guestIdentity() {
-    final code = _installationCode;
-    return Row(
-      children: [
-        Expanded(
-          child: code == null
-              ? Align(
-                  alignment: Alignment.centerLeft,
-                  child: TextButton(
-                    onPressed: _busy ? null : _refresh,
-                    child: const Text('加载游客识别码'),
-                  ),
-                )
-              : Text(
-                  '游客识别码 $code',
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 18,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
+  Widget _signedOutAccount() => Row(
+    children: [
+      const Expanded(
+        child: Text(
+          '尚未登录',
+          style: TextStyle(color: Colors.white, fontSize: 18),
         ),
-        const SizedBox(width: 12),
-        FilledButton(
-          onPressed: _busy ? null : _requestAuthentication,
-          style: FilledButton.styleFrom(
-            backgroundColor: _gold,
-            foregroundColor: const Color(0xFF292115),
-          ),
-          child: const Text('登录 / 注册'),
-        ),
-      ],
-    );
-  }
-
-  Widget _trialStatusCard() {
-    final expires = _trialEndsAt;
-    final status = expires == null
-        ? '可免费试用 15 分钟，首次使用时开始计时。'
-        : _trialExpired
-        ? '15 分钟试用已结束。'
-        : '试用截止 ${MaterialLocalizations.of(context).formatTimeOfDay(TimeOfDay.fromDateTime(expires.toLocal()))}';
-    return _surface(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text('免费试用'),
-          Text(status),
-          if (!_hasMembership && !_trialExpired)
-            TextButton(
-              onPressed: _busy || _isConnecting || _isConnected
-                  ? null
-                  : () => _runButtonAction(TunnelState.connecting, _startTrial),
-              child: Text(expires == null ? '开始试用' : '继续试用'),
-            ),
-        ],
       ),
-    );
-  }
+      FilledButton(
+        onPressed: _busy ? null : _requestAuthentication,
+        style: FilledButton.styleFrom(
+          backgroundColor: _gold,
+          foregroundColor: _pageColor,
+        ),
+        child: const Text('登录 / 注册'),
+      ),
+    ],
+  );
 
   String get _restoreLabel => _busy ? '正在恢复账号…' : '重试恢复账号';
 
@@ -1118,7 +1044,7 @@ class _HomeScreenState extends State<HomeScreen> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         if (account == null)
-          _guestIdentity()
+          _signedOutAccount()
         else
           Text(
             account.email,
@@ -1141,7 +1067,9 @@ class _HomeScreenState extends State<HomeScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                account?.planName ?? '暂未开通套餐',
+                _trialPlan && !_usingTrial
+                    ? '试用已结束'
+                    : account?.planName ?? '暂未开通套餐',
                 style: const TextStyle(
                   color: Color(0xFF292115),
                   fontSize: 21,
@@ -1151,7 +1079,9 @@ class _HomeScreenState extends State<HomeScreen> {
               if (endsAt != null) ...[
                 const SizedBox(height: 8),
                 Text(
-                  '有效期至 ${_date(endsAt)}',
+                  _trialPlan
+                      ? '试用截止 ${MaterialLocalizations.of(context).formatTimeOfDay(TimeOfDay.fromDateTime(endsAt.toLocal()))}'
+                      : '有效期至 ${_date(endsAt)}',
                   style: const TextStyle(color: Color(0xFF4C3920)),
                 ),
               ],
@@ -1167,10 +1097,7 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ),
         const SizedBox(height: 20),
-        if (!_hasMembership) ...[
-          _trialStatusCard(),
-          const SizedBox(height: 20),
-        ],
+
         if (account != null) ...[
           ListTile(
             leading: const Icon(Icons.lock_outline),
@@ -1425,12 +1352,8 @@ class _HomeScreenState extends State<HomeScreen> {
                                 ? '断开连接'
                                 : _sessionUnresolved
                                 ? _restoreLabel
-                                : !_hasMembership && !isTrial
-                                ? (_trialExpired
-                                      ? '开通会员'
-                                      : _trialEndsAt == null
-                                      ? '免费试用'
-                                      : '继续试用')
+                                : _account != null && !_canConnect
+                                ? '开通会员'
                                 : '连接 VPN',
                           ),
                         ],
@@ -1446,7 +1369,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       )
                     else if (isTrial)
                       const Text('15 分钟试用', style: TextStyle(color: muted))
-                    else if (_device != null && _account?.planTier != null)
+                    else if (_device != null && _canConnect)
                       OutlinedButton(
                         onPressed: _busy || _isConnecting ? null : _showRegions,
                         style: OutlinedButton.styleFrom(
@@ -1621,22 +1544,18 @@ class _HomeScreenState extends State<HomeScreen> {
       return;
     }
     if (_sessionUnresolved) return _refresh();
-    if (!_hasMembership && !_usingTrial) {
-      if (_trialExpired) {
-        if (_account == null) {
-          _requestAuthentication(purchasing: true);
-        } else {
-          setState(() {
-            _tab = 1;
-            _message = '15 分钟试用已结束，请开通会员后连接。';
-          });
-        }
-      } else {
-        await _startTrial();
-      }
+    if (_account == null) {
+      _requestAuthentication(connecting: true);
       return;
     }
-    if (_connectionDevice == null) {
+    if (!_canConnect) {
+      setState(() {
+        _tab = 1;
+        _message = '请开通会员后连接。';
+      });
+      return;
+    }
+    if (_device == null) {
       setState(() => _busy = true);
       try {
         await _loadDevices();
@@ -1647,7 +1566,7 @@ class _HomeScreenState extends State<HomeScreen> {
         if (mounted) setState(() => _busy = false);
       }
       if (!mounted) return;
-      if (_connectionDevice == null) {
+      if (_device == null) {
         setState(() => _message = '设备登记 [DEVICE-REGISTER]：未能自动登记本机，请刷新后重试。');
         return;
       }
@@ -1660,8 +1579,8 @@ class _HomeScreenState extends State<HomeScreen> {
     bool switchRegion = false,
   }) async {
     if (_busy) return;
-    final device = _connectionDevice;
-    final api = _vpnApi;
+    final device = _device;
+    final api = widget.api;
     if (requested == null || device == null) {
       setState(
         () => _message = device == null
@@ -1731,12 +1650,11 @@ class _HomeScreenState extends State<HomeScreen> {
           device.id,
           region: regional ? region : null,
         );
-        if (!mounted) {
+        if (!mounted || !_canConnect) {
           await api.releaseConnection(lease);
           return;
         }
         _leaseInvalid = false;
-        _leaseApi = api;
         _trackLease(lease, clock.elapsed);
         if (regional && lease.endpointId == null) {
           throw StateError('服务器未分配连接线路，请重试');
@@ -1754,6 +1672,7 @@ class _HomeScreenState extends State<HomeScreen> {
         if (!mounted ||
             _lease == null ||
             _leaseInvalid ||
+            !_canConnect ||
             node == null ||
             !node.connectable) {
           await _releaseLease();
@@ -1802,7 +1721,7 @@ class _HomeScreenState extends State<HomeScreen> {
     _renewal = Timer(delay, () async {
       final clock = Stopwatch()..start();
       try {
-        final next = await (_leaseApi ?? _vpnApi).reserveConnection(
+        final next = await widget.api.reserveConnection(
           lease.deviceId,
           token: lease.token,
         );
@@ -1831,7 +1750,11 @@ class _HomeScreenState extends State<HomeScreen> {
       await _releaseLease();
     }
     if (mounted) {
-      setState(() => _message = 'VPN 连接名额已失效，请重新连接。');
+      setState(
+        () => _message = _trialPlan && !_usingTrial
+            ? '15 分钟试用已结束，可开通会员继续使用。'
+            : 'VPN 连接名额已失效，请重新连接。',
+      );
     }
   }
 
@@ -1843,14 +1766,13 @@ class _HomeScreenState extends State<HomeScreen> {
     _leaseInvalid = true; // An in-flight heartbeat must not restart this lease.
     if ((_leaseAge?.elapsed ?? Duration.zero) >= _leaseRemaining) {
       _lease = null;
-      _leaseApi = null;
       _renewal?.cancel();
       _leaseExpiry?.cancel();
       return true;
     }
     _renewal?.cancel();
     _leaseExpiry?.cancel();
-    final release = (_leaseApi ?? _vpnApi)
+    final release = widget.api
         .releaseConnection(lease)
         .timeout(const Duration(seconds: 5))
         .then((_) => true, onError: (Object _) => false);
@@ -1858,7 +1780,6 @@ class _HomeScreenState extends State<HomeScreen> {
     final released = await release;
     if (released && identical(_lease, lease)) {
       _lease = null;
-      _leaseApi = null;
     }
     if (identical(release, _releaseInFlight)) _releaseInFlight = null;
     return released;
@@ -1875,17 +1796,12 @@ class _HomeScreenState extends State<HomeScreen> {
         if (!mounted) return;
         await Future.wait([
           if (_account == null) widget.tunnel.initialize(),
-          if (!_hasMembership) _identifyInstallation(),
           _loadPlans(),
         ]);
       } else {
-        final hadMembership = _hasMembership;
-        _account = await widget.api.loadAccount();
-        if (!hadMembership && _hasMembership && _leaseApi == _trialApi) {
-          await widget.tunnel.disconnect();
-          await _releaseLease();
-          _selectedNode = null;
-        }
+        final account = await widget.api.loadAccount();
+        if (!mounted) return;
+        _setAccount(account);
         await _loadDevices();
         await _loadPlans();
       }

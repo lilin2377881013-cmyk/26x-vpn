@@ -1,5 +1,5 @@
 $ErrorActionPreference = 'Stop'
-$installer = Join-Path $PSScriptRoot '..\windows\26x-VPN-0.1.12-Setup-x64.exe'
+$installer = Join-Path $PSScriptRoot '..\windows\26x-VPN-0.1.13-Setup-x64.exe'
 $directory = Join-Path $env:ProgramFiles '26x VPN'
 $registry = 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\26xVPN'
 $process = Start-Process -FilePath $installer -ArgumentList '/S' -PassThru -Wait
@@ -9,7 +9,7 @@ try {
         if (-not (Test-Path (Join-Path $directory $file))) { throw "Missing installed file: $file" }
     }
     $entry = Get-ItemProperty $registry
-    if ($entry.DisplayVersion -ne '0.1.12') { throw 'Wrong installed version' }
+    if ($entry.DisplayVersion -ne '0.1.13') { throw 'Wrong installed version' }
     $shortcut = Join-Path ([Environment]::GetFolderPath('CommonStartMenu')) 'Programs\26x VPN.lnk'
     if (-not (Test-Path $shortcut)) { throw 'Start menu shortcut missing' }
     Add-Type -AssemblyName System.Drawing
@@ -53,7 +53,7 @@ try {
         Remove-Item $configPath
     }
     $signature = Get-AuthenticodeSignature $installer
-    $report = [ordered]@{ version = '0.1.12'; build = 28; installation = 'passed'; runtimeAssets = 'passed'; workerInputValidation = 'passed'; postTunnelFailureRollback = 'passed'; dnsFailureRollback = 'passed'; immediateSwitchAfterExit = 'passed'; forcedExitRecovery = 'passed'; nativeTunnelDnsAndRouteCleanup = 'passed'; authenticodeStatus = $signature.Status.ToString(); sha256 = (Get-FileHash $installer -Algorithm SHA256).Hash.ToLower() }
+    $report = [ordered]@{ version = '0.1.13'; build = 29; installation = 'passed'; runtimeAssets = 'passed'; workerInputValidation = 'passed'; postTunnelFailureRollback = 'passed'; dnsFailureRollback = 'passed'; immediateSwitchAfterExit = 'passed'; forcedExitRecovery = 'passed'; nativeTunnelDnsAndRouteCleanup = 'passed'; authenticodeStatus = $signature.Status.ToString(); sha256 = (Get-FileHash $installer -Algorithm SHA256).Hash.ToLower() }
 } finally {
     $uninstaller = Join-Path $directory 'Uninstall.exe'
     if (Test-Path $uninstaller) {

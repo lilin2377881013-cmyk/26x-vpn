@@ -16,12 +16,6 @@ class _Accounts extends ApiClient {
   bool failRestore;
   final bool member;
   int restores = 0;
-  int identities = 0;
-  int trials = 0;
-
-  @override
-  ApiClient createTrialClient() => this;
-
   @override
   Future<bool> restoreSession() async {
     restores++;
@@ -34,20 +28,6 @@ class _Accounts extends ApiClient {
       planTier: 'standard',
     );
     return true;
-  }
-
-  @override
-  Future<({String code, DateTime? endsAt})> identifyTrial(
-    String platform,
-  ) async {
-    identities++;
-    return (code: 'GUEST', endsAt: null);
-  }
-
-  @override
-  Future<({Account account, Device device})> startTrial(String platform) async {
-    trials++;
-    throw StateError('unexpected trial');
   }
 
   @override
@@ -76,6 +56,7 @@ class _LeasedAccount extends _Accounts {
   final reservation = Completer<void>();
   final release = Completer<void>();
   bool authorized = false;
+  Duration get leaseDuration => const Duration(seconds: 90);
 
   @override
   Future<List<VpnNode>> loadNodes({String? deviceId}) async {
@@ -111,7 +92,7 @@ class _LeasedAccount extends _Accounts {
     return ConnectionLease(
       deviceId,
       'fixture',
-      const Duration(seconds: 90),
+      leaseDuration,
       endpointId: 'endpoint',
     );
   }
@@ -210,13 +191,10 @@ void main() {
       await tester.tap(find.text('重试恢复账号'));
       await tester.pumpAndSettle();
       expect(api.restores, 2);
-      expect(api.identities, 0);
-      expect(api.trials, 0);
       api.failRestore = false;
       await tester.tap(find.byTooltip('刷新'));
       await tester.pumpAndSettle();
       expect(api.restores, 3);
-      expect(api.identities, 0);
       expect(find.text('连接 VPN'), findsOneWidget);
       await tester.tap(find.text('我的'));
       await tester.pumpAndSettle();
@@ -226,7 +204,7 @@ void main() {
   );
 
   testWidgets(
-    'a fresh guest still gets an identity without consuming the trial',
+    'tapping connect while signed out opens registration with a login alternative',
     (tester) async {
       final api = _Accounts(member: false);
       await tester.pumpWidget(
@@ -235,11 +213,80 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
+      expect(find.text('连接 VPN'), findsOneWidget);
       await tester.tap(find.text('我的'));
       await tester.pumpAndSettle();
-      expect(find.text('游客识别码 GUEST'), findsOneWidget);
-      expect(api.identities, 1);
-      expect(api.trials, 0);
+      expect(find.text('尚未登录'), findsOneWidget);
+      expect(find.textContaining('识别码'), findsNothing);
+      await tester.tap(find.text('连接'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('连接 VPN'));
+      await tester.pumpAndSettle();
+      expect(find.text('注册账户'), findsOneWidget);
+      await tester.ensureVisible(find.text('已有账号，返回登录'));
+      await tester.tap(find.text('已有账号，返回登录'));
+      await tester.pumpAndSettle();
+      expect(find.text('登录账户'), findsOneWidget);
     },
   );
+
+  testWidgets(
+    'registered trial resumes the original connection and stops at expiry',
+    (tester) async {
+      final api = _NewMember();
+      final tunnel = _TestTunnel()..stopped.complete();
+      await tester.pumpWidget(
+        MaterialApp(
+          home: HomeScreen(api: api, tunnel: tunnel),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('连接 VPN'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField).first, 'new@example.test');
+      await tester.enterText(
+        find.byType(TextField).last,
+        'a-valid-test-password',
+      );
+      await tester.ensureVisible(find.text('注册账户'));
+      await tester.tap(find.text('注册账户'));
+      await tester.pumpAndSettle();
+      expect(find.text('已连接'), findsOneWidget);
+      expect(find.text('15 分钟试用'), findsOneWidget);
+      await tester.pump(const Duration(minutes: 14));
+      expect(find.text('已连接'), findsOneWidget);
+      await tester.pump(const Duration(minutes: 1));
+      await tester.pump();
+      expect(find.text('未连接'), findsOneWidget);
+      expect(api.calls.where((c) => c == 'release'), hasLength(1));
+      expect(find.text('开通会员'), findsOneWidget);
+      expect(find.textContaining('试用已结束'), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+      await tunnel.events.close();
+    },
+  );
+}
+
+class _NewMember extends _LeasedAccount {
+  _NewMember() {
+    reservation.complete();
+    release.complete();
+  }
+
+  @override
+  Duration get leaseDuration => const Duration(hours: 1);
+
+  @override
+  Future<bool> restoreSession() async => false;
+
+  @override
+  Future<Account> register(String email, String password) async =>
+      account = Account(
+        id: 'new',
+        email: email,
+        status: 'active',
+        planTier: 'standard',
+        planCode: 'trial-15m',
+        subscriptionEndsAt: DateTime.now().add(const Duration(minutes: 15)),
+      );
 }

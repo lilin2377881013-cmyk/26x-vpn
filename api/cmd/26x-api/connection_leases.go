@@ -61,6 +61,26 @@ func (s *server) acquireConnectionLease(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 	}
+	if user.memberApp && user.deviceID != device {
+		// A client already connected during rollout can prove its device with its live lease.
+		if user.deviceID != "" || input.Token == "" {
+			writeError(w, http.StatusForbidden, "device_enrollment_required", "请先登记本机设备")
+			return
+		}
+		hash := sha256.Sum256([]byte(input.Token))
+		res, err := tx.ExecContext(ctx, `UPDATE sessions SET device_id=$2 WHERE id=$1 AND device_id IS NULL AND revoked_at IS NULL
+			AND created_at <= (SELECT applied_at FROM schema_migrations WHERE version='022_login_devices')
+			AND EXISTS(SELECT 1 FROM connection_leases WHERE device_id=$2 AND user_id=$3 AND token_hash=$4 AND expires_at>clock_timestamp())`,
+			user.sessionID, device, user.id, hash[:])
+		if err != nil {
+			connectionLeaseError(w)
+			return
+		}
+		if n, _ := res.RowsAffected(); n != 1 {
+			writeError(w, http.StatusForbidden, "device_enrollment_required", "请先登记本机设备")
+			return
+		}
+	}
 	var quotaAvailable bool
 	err = tx.QueryRowContext(ctx, `SELECT unrestricted OR monthly_quota_bytes IS NULL OR (
 		SELECT COALESCE(sum(bytes_up) + sum(bytes_down), 0) < monthly_quota_bytes

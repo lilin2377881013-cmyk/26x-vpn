@@ -67,9 +67,6 @@ func TestInstallationEnrollmentAndConnectionLimits(t *testing.T) {
 			if restored := readDevice(call(s.registerDevice, body(0), ""), 200); restored != devices[0] {
 				t.Fatal("existing installation counted as a new device")
 			}
-			if w := call(s.registerDevice, body(fixture.devices), ""); w.Code != 409 {
-				t.Fatalf("device above limit unexpectedly admitted: %d %s", w.Code, w.Body.String())
-			}
 			for i, id := range devices {
 				w := call(s.acquireConnectionLease, `{}`, id)
 				expected := 200
@@ -100,10 +97,14 @@ func TestInstallationEnrollmentAndConnectionLimits(t *testing.T) {
 					}
 				}
 			}
+			readDevice(call(s.registerDevice, body(fixture.devices), ""), 201)
+			if w := call(s.acquireConnectionLease, `{}`, devices[1]); w.Code != 404 {
+				t.Fatal("earliest device retained", w.Code)
+			}
 			if w := call(s.revokeDevice, `{}`, devices[len(devices)-1]); w.Code != 204 {
 				t.Fatalf("failed to remove a device: %d %s", w.Code, w.Body.String())
 			}
-			readDevice(call(s.registerDevice, body(fixture.devices), ""), 201)
+			readDevice(call(s.registerDevice, body(fixture.devices+1), ""), 201)
 		})
 	}
 }

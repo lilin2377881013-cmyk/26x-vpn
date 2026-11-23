@@ -90,36 +90,14 @@ func (s *server) createMemberSession(ctx context.Context, user, verifiedHash, ch
 	if err != nil {
 		return err
 	}
-	var multipleApps bool
-	if channel == "app" && !unrestricted {
-		err = tx.QueryRowContext(ctx, `SELECT COALESCE((SELECT p.tier='premium'
-			FROM subscriptions sub JOIN plans p ON p.id=sub.plan_id
-			WHERE sub.user_id=$1 AND sub.status='active' AND sub.starts_at<=now()
-			AND (sub.ends_at IS NULL OR sub.ends_at>now())
-			ORDER BY sub.ends_at DESC NULLS FIRST LIMIT 1),false)`, user).Scan(&multipleApps)
-		if err != nil {
-			return err
-		}
-	}
-	if !unrestricted && !multipleApps {
-		// Unknown pre-upgrade tokens are displaced by an app login. A web login
-		// only replaces a known web token so a purchase cannot disconnect an app.
+	if channel == "portal" && !unrestricted {
 		_, err = tx.ExecContext(ctx, `UPDATE sessions SET revoked_at=now()
-			WHERE actor_kind='user' AND actor_id=$1 AND revoked_at IS NULL
-			AND (member_channel=$2 OR ($2='app' AND member_channel='legacy'))`, user, channel)
+			WHERE actor_kind='user' AND actor_id=$1 AND member_channel='portal' AND revoked_at IS NULL`, user)
 		if err != nil {
 			return err
 		}
-		if channel == "app" {
-			_, err = tx.ExecContext(ctx, `WITH released AS (
-				DELETE FROM connection_leases WHERE user_id=$1 RETURNING device_id
-			) UPDATE device_node_credentials c SET reconcile_after=now()
-			FROM released WHERE c.device_id=released.device_id AND c.managed`, user)
-			if err != nil {
-				return err
-			}
-		}
 	}
+	// Installed apps supply their installation token in the enrollment request after login.
 	_, err = tx.ExecContext(ctx, `INSERT INTO sessions(actor_kind,actor_id,token_hash,csrf_token,member_channel,expires_at)
 		VALUES ('user',$1,$2,$3,$4,NULL)`, user, tokenHash, csrf, channel)
 	if err != nil {

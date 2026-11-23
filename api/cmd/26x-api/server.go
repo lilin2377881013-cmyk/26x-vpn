@@ -36,6 +36,8 @@ type server struct {
 
 type actor struct {
 	sessionID string
+	memberApp bool
+	deviceID  string
 	id        string
 	kind      string
 	role      string
@@ -291,6 +293,16 @@ func (s *server) requireUser(next http.HandlerFunc) http.HandlerFunc {
 			s.userAuthError(w, err)
 			return
 		}
+		if current.memberApp && current.deviceID == "" {
+			// The installed clients load /me and the device list before enrolling.
+			switch r.Pattern {
+			case "GET /api/v1/me", "GET /api/v1/me/devices", "POST /api/v1/me/devices", "DELETE /api/v1/auth/session",
+				"PUT /api/v1/me/devices/{id}/connection-lease", "DELETE /api/v1/me/devices/{id}/connection-lease":
+			default:
+				writeError(w, http.StatusForbidden, "device_enrollment_required", "请先登记本机设备")
+				return
+			}
+		}
 		r = r.WithContext(contextWithActor(r, current))
 		next(w, r)
 	}
@@ -305,13 +317,15 @@ func (s *server) authenticate(r *http.Request, kind string) (actor, error) {
 	tokenHash := sha256.Sum256([]byte(cookie.Value))
 	var current actor
 	var channel string
-	err = s.db.QueryRowContext(r.Context(), `SELECT s.id::text, s.actor_id::text, s.actor_kind, s.csrf_token, COALESCE(s.member_channel, ''),
+	err = s.db.QueryRowContext(r.Context(), `SELECT s.id::text, s.actor_id::text, s.actor_kind, s.csrf_token, COALESCE(s.member_channel, ''), COALESCE(s.device_id::text,''),
 		CASE WHEN s.actor_kind = 'admin' THEN COALESCE(a.role, '') ELSE '' END
 		FROM sessions s
+		LEFT JOIN devices d ON d.id=s.device_id
 		LEFT JOIN admin_accounts a ON s.actor_kind = 'admin' AND a.id = s.actor_id AND a.disabled_at IS NULL
 		LEFT JOIN users u ON s.actor_kind = 'user' AND u.id = s.actor_id AND u.status = 'active'
 		WHERE s.token_hash = $1 AND s.actor_kind = $2 AND s.revoked_at IS NULL AND (s.expires_at IS NULL OR s.expires_at > now())
-		AND ((s.actor_kind = 'admin' AND a.id IS NOT NULL) OR (s.actor_kind = 'user' AND u.id IS NOT NULL))`, tokenHash[:], kind).Scan(&current.sessionID, &current.id, &current.kind, &current.csrf, &channel, &current.role)
+		AND (s.device_id IS NULL OR (d.revoked_at IS NULL AND d.user_id=s.actor_id))
+		AND ((s.actor_kind = 'admin' AND a.id IS NOT NULL) OR (s.actor_kind = 'user' AND u.id IS NOT NULL))`, tokenHash[:], kind).Scan(&current.sessionID, &current.id, &current.kind, &current.csrf, &channel, &current.deviceID, &current.role)
 	if err != nil {
 		return actor{}, err
 	}
@@ -326,6 +340,7 @@ func (s *server) authenticate(r *http.Request, kind string) (actor, error) {
 				return actor{}, err
 			}
 		}
+		current.memberApp = channel == "app"
 		if channel != want || (channel == "portal" && !portalAllows(r)) {
 			return actor{}, sql.ErrNoRows
 		}
@@ -371,7 +386,12 @@ func (s *server) withUserCSRF(next http.HandlerFunc) http.HandlerFunc {
 func (s *server) logout(w http.ResponseWriter, r *http.Request) {
 	current := actorFromContext(r)
 	sessionName, csrfName := sessionNames(r, current.kind)
-	if cookie, err := r.Cookie(sessionName); err == nil {
+	if current.memberApp && current.deviceID != "" {
+		if err := s.signOutDevice(r.Context(), current); err != nil {
+			writeError(w, http.StatusServiceUnavailable, "session_unavailable", "Could not sign out. Try again.")
+			return
+		}
+	} else if cookie, err := r.Cookie(sessionName); err == nil {
 		hash := sha256.Sum256([]byte(cookie.Value))
 		if _, err = s.db.ExecContext(r.Context(), "UPDATE sessions SET revoked_at = now() WHERE token_hash = $1 AND actor_id = $2", hash[:], current.id); err != nil {
 			writeError(w, http.StatusServiceUnavailable, "session_unavailable", "Could not sign out. Try again.")
@@ -494,8 +514,14 @@ func (s *server) changeMyPassword(w http.ResponseWriter, r *http.Request) {
 
 func (s *server) listMyDevices(w http.ResponseWriter, r *http.Request) {
 	current := actorFromContext(r)
+	// Old apps skip enrollment if their cached device ID appears in this list.
+	// An unbound login must present its installation token once before viewing the inventory.
+	if current.memberApp && current.deviceID == "" {
+		writeJSON(w, http.StatusOK, map[string]any{"items": []any{}})
+		return
+	}
 	rows, err := s.db.QueryContext(r.Context(), `SELECT id::text, platform, label, app_version, core_version, last_seen_at, created_at
-		FROM devices WHERE user_id = $1 AND revoked_at IS NULL ORDER BY created_at DESC`, current.id)
+		FROM devices WHERE user_id = $1 AND revoked_at IS NULL ORDER BY last_login_at DESC, id`, current.id)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Unable to read devices")
 		return
@@ -535,51 +561,22 @@ func (s *server) registerDevice(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback()
-	// Serialize concurrent device registrations for this account before checking
-	// its limit; otherwise two requests could both consume the last available slot.
-	var unrestricted bool
-	if err := tx.QueryRowContext(r.Context(), "SELECT unrestricted FROM users WHERE id = $1 FOR UPDATE", current.id).Scan(&unrestricted); err != nil {
-		writeError(w, http.StatusUnauthorized, "sign_in_required", "Sign in to your 26x account")
-		return
-	}
-	if input.InstallationToken != "" {
-		var id string
-		err = tx.QueryRowContext(r.Context(), `UPDATE devices SET last_seen_at=now(), label=$4
-   WHERE user_id=$1 AND installation_token=$2 AND platform=$3 AND revoked_at IS NULL RETURNING id::text`,
-			current.id, input.InstallationToken, input.Platform, strings.TrimSpace(input.Label)).Scan(&id)
-		if err == nil {
-			if err = tx.Commit(); err == nil {
-				writeJSON(w, http.StatusOK, map[string]any{"id": id, "platform": input.Platform, "label": strings.TrimSpace(input.Label)})
+	id, created, err := enrollDevice(r.Context(), tx, current, input.Platform, strings.TrimSpace(input.Label), input.AppVersion, input.CoreVersion, input.InstallationToken)
+	if errors.Is(err, errLoginDeviceRemoved) {
+		tx.Rollback()
+		// An old, still-unbound installation may first come back after its eviction.
+		if current.memberApp && current.deviceID == "" {
+			if _, err := s.db.ExecContext(r.Context(), `UPDATE sessions SET revoked_at=now()
+				WHERE id=$1 AND device_id IS NULL AND revoked_at IS NULL`, current.sessionID); err != nil {
+				s.userAuthError(w, err)
 				return
 			}
 		}
-		if !errors.Is(err, sql.ErrNoRows) {
-			writeError(w, http.StatusInternalServerError, "internal_error", "Unable to restore device")
-			return
-		}
+		s.userAuthError(w, sql.ErrNoRows)
+		return
 	}
-	var deviceLimit int
-	err = tx.QueryRowContext(r.Context(), `SELECT COALESCE((SELECT CASE WHEN p.code='trial-15m' THEN 1 WHEN p.tier='premium' THEN 6 ELSE 3 END
-  FROM subscriptions s JOIN plans p ON p.id=s.plan_id
-  WHERE s.user_id=$1 AND s.status='active' AND s.starts_at<=now() AND (s.ends_at IS NULL OR s.ends_at>now())
-  ORDER BY s.ends_at DESC NULLS FIRST LIMIT 1),3)`, current.id).Scan(&deviceLimit)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Unable to check device limit")
-		return
-	}
-	var count int
-	if err := tx.QueryRowContext(r.Context(), "SELECT count(*) FROM devices WHERE user_id = $1 AND revoked_at IS NULL", current.id).Scan(&count); err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Unable to check device limit")
-		return
-	}
-	if !unrestricted && count >= deviceLimit {
-		writeError(w, http.StatusConflict, "device_limit_reached", "Remove a device before adding another")
-		return
-	}
-	var id string
-	err = tx.QueryRowContext(r.Context(), `INSERT INTO devices(user_id, platform, label, app_version, core_version, last_seen_at, installation_token)
-		VALUES ($1, $2, $3, NULLIF($4, ''), NULLIF($5, ''), now(), NULLIF($6, '')) RETURNING id::text`, current.id, input.Platform, strings.TrimSpace(input.Label), input.AppVersion, input.CoreVersion, input.InstallationToken).Scan(&id)
-	if err != nil {
+		s.logger.Error("enroll login device", "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Unable to register device")
 		return
 	}
@@ -587,7 +584,13 @@ func (s *server) registerDevice(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Unable to register device")
 		return
 	}
-	writeJSON(w, http.StatusCreated, map[string]any{"id": id, "platform": input.Platform, "label": strings.TrimSpace(input.Label), "credentialStatus": "pending"})
+	item := map[string]any{"id": id, "platform": input.Platform, "label": strings.TrimSpace(input.Label)}
+	if created {
+		item["credentialStatus"] = "pending"
+		writeJSON(w, http.StatusCreated, item)
+		return
+	}
+	writeJSON(w, http.StatusOK, item)
 }
 
 func (s *server) revokeDevice(w http.ResponseWriter, r *http.Request) {
@@ -599,18 +602,16 @@ func (s *server) revokeDevice(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback()
-	result, err := tx.ExecContext(r.Context(), "UPDATE devices SET revoked_at = now() WHERE id = $1 AND user_id = $2 AND revoked_at IS NULL", id, current.id)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_device", "Device could not be revoked")
+	if _, err := tx.ExecContext(r.Context(), "SELECT id FROM users WHERE id=$1 FOR UPDATE", current.id); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "Unable to remove device")
 		return
 	}
-	count, _ := result.RowsAffected()
-	if count == 0 {
-		writeError(w, http.StatusNotFound, "device_not_found", "Device does not exist")
-		return
-	}
-	if _, err := tx.ExecContext(r.Context(), `UPDATE device_node_credentials SET status = 'revoking', reconcile_after = now() WHERE device_id = $1 AND status IN ('pending', 'active', 'error')`, id); err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Unable to revoke device credentials")
+	if err := removeLoginDevice(r.Context(), tx, current.id, id); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "device_not_found", "Device does not exist")
+		} else {
+			writeError(w, http.StatusInternalServerError, "internal_error", "Unable to remove device")
+		}
 		return
 	}
 	if err := tx.Commit(); err != nil {
@@ -637,6 +638,10 @@ func (s *server) writeClientNodes(w http.ResponseWriter, r *http.Request, rawDev
 	}
 	if !uuidPattern.MatchString(deviceID) {
 		writeError(w, http.StatusBadRequest, "invalid_device", "Device ID must be a UUID")
+		return
+	}
+	if current.memberApp && current.deviceID != deviceID {
+		writeError(w, http.StatusForbidden, "device_enrollment_required", "请先登记本机设备")
 		return
 	}
 	var deviceExists bool

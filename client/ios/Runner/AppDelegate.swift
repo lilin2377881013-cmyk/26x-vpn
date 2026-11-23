@@ -58,13 +58,25 @@ private final class TunnelBridgePlugin: NSObject, FlutterPlugin, FlutterStreamHa
         result(failure("tunnel_busy", "VPN 状态正在变更。"))
         return
       }
+      changingConnection = true
       load { error in
-        if error != nil {
+        guard error == nil else {
+          self.changingConnection = false
           result(self.failure("tunnel_stop_failed", "无法读取 VPN 配置。"))
           return
         }
-        self.manager?.connection.stopVPNTunnel()
-        result(nil)
+        guard let connection = self.manager?.connection,
+              connection.status != .invalid && connection.status != .disconnected else {
+          self.changingConnection = false
+          result(["state": "disconnected"])
+          return
+        }
+        connection.stopVPNTunnel()
+        TunnelStatusWait.until(.disconnected, on: connection, timeout: 12) { stopped in
+          self.changingConnection = false
+          if stopped { result(["state": "disconnected"]) }
+          else { result(self.failure("tunnel_stop_timeout", "系统未确认 VPN 已断开。")) }
+        }
       }
     default:
       result(FlutterMethodNotImplemented)
@@ -147,45 +159,23 @@ private final class TunnelBridgePlugin: NSObject, FlutterPlugin, FlutterStreamHa
             self.manager = manager
             do {
               try session.startTunnel(options: ["xrayJson": config as NSString])
-              self.waitForConnection(session, deadline: .now() + 35, finish: finish)
+              TunnelStatusWait.until(.connected, on: session, timeout: 35) { connected in
+                if connected {
+                  finish(nil)
+                } else if #available(iOS 16.0, *), session.status == .disconnected {
+                  session.fetchLastDisconnectError { error in
+                    DispatchQueue.main.async { finish(self.startupFailure(error)) }
+                  }
+                } else {
+                  session.stopTunnel()
+                  finish(self.startupFailure(nil))
+                }
+              }
             } catch {
               finish(self.failure("tunnel_start_failed", "无法启动 VPN 隧道。"))
             }
           }
         }
-      }
-    }
-  }
-
-  private func waitForConnection(
-    _ session: NETunnelProviderSession,
-    deadline: DispatchTime,
-    sawConnecting: Bool = false,
-    finish: @escaping (FlutterError?) -> Void
-  ) {
-    let status = session.status
-    if status == .connected {
-      finish(nil)
-    } else if sawConnecting && status == .disconnected {
-      if #available(iOS 16.0, *) {
-        session.fetchLastDisconnectError { error in
-          DispatchQueue.main.async {
-            finish(self.startupFailure(error))
-          }
-        }
-      } else {
-        finish(startupFailure(nil))
-      }
-    } else if DispatchTime.now() >= deadline {
-      session.stopTunnel()
-      finish(failure("tunnel_start_failed", "VPN 隧道连接失败。"))
-    } else {
-      DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-        self.waitForConnection(
-          session, deadline: deadline,
-          sawConnecting: sawConnecting || status == .connecting || status == .reasserting,
-          finish: finish
-        )
       }
     }
   }

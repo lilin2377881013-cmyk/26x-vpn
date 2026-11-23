@@ -1,7 +1,7 @@
 name: twentysixx_client
 description: 26x VPN client for iOS, macOS, Windows, and Android.
 publish_to: none
-version: 0.1.8+24
+version: 0.1.12+28
 
 environment:
   sdk: '>=3.10.0 <4.0.0'

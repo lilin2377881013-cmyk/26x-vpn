@@ -1,9 +1,9 @@
 # 26x client
 
 The shared Flutter app runs on iOS, macOS, Android, and Windows. It uses
-`GET /api/v1/nodes` and `GET /api/v1/devices/:id/credentials` with the user's
-authenticated session. Older API deployments can continue to serve the
-existing client bootstrap endpoint.
+the authenticated `GET /api/v1/nodes` response for device profiles. It also
+supports older servers that provide profiles through the device credentials
+or client bootstrap endpoint.
 
 ## Local development
 

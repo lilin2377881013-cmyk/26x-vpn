@@ -40,6 +40,9 @@ class _HomeScreenState extends State<HomeScreen> {
   VpnNode? _selectedNode;
   TunnelSnapshot _tunnelState = const TunnelSnapshot(TunnelState.disconnected);
   bool _busy = false;
+  TunnelState? _buttonAction;
+  String? _nodesDeviceId;
+  ApiClient? _nodesApi;
   bool _sessionUnresolved = true;
   int _tab = 0;
   String _planTier = 'standard';
@@ -63,8 +66,13 @@ class _HomeScreenState extends State<HomeScreen> {
     super.initState();
     _tunnelState = widget.tunnel.current;
     _tunnelSubscription = widget.tunnel.changes.listen((value) {
+      final previous = _tunnelState.state;
       if (mounted) setState(() => _tunnelState = value);
-      if (value.state == TunnelState.disconnected) {
+      if (value.state == TunnelState.disconnected &&
+          previous != TunnelState.disconnected &&
+          (_buttonAction != TunnelState.connecting ||
+              previous == TunnelState.connected ||
+              previous == TunnelState.disconnecting)) {
         unawaited(_releaseLease());
       }
     });
@@ -327,8 +335,16 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _loadNodes() async {
-    final previous = _selectedNode;
-    _nodes = await _vpnApi.loadNodes(deviceId: _connectionDevice?.id);
+    final api = _vpnApi;
+    final deviceId = _connectionDevice?.id;
+    final nodes = await api.loadNodes(deviceId: deviceId);
+    if (!mounted || api != _vpnApi || deviceId != _connectionDevice?.id) return;
+    final previous = _nodesDeviceId == deviceId && _nodesApi == api
+        ? _selectedNode
+        : null;
+    _nodes = nodes;
+    _nodesDeviceId = deviceId;
+    _nodesApi = api;
     if (previous == null) {
       _selectedNode =
           _nodes.where((node) => node.connectable).firstOrNull ??
@@ -582,7 +598,21 @@ class _HomeScreenState extends State<HomeScreen> {
     return _deviceLabel;
   }
 
+  Future<void> _runButtonAction(
+    TunnelState action,
+    Future<void> Function() operation,
+  ) async {
+    if (_busy || _isConnecting) return;
+    setState(() => _buttonAction = action);
+    try {
+      await operation();
+    } finally {
+      if (mounted) setState(() => _buttonAction = null);
+    }
+  }
+
   bool get _isConnecting =>
+      _buttonAction != null ||
       _tunnelState.state == TunnelState.connecting ||
       _tunnelState.state == TunnelState.disconnecting;
   bool get _isConnected => _tunnelState.state == TunnelState.connected;
@@ -1065,7 +1095,7 @@ class _HomeScreenState extends State<HomeScreen> {
             TextButton(
               onPressed: _busy || _isConnecting || _isConnected
                   ? null
-                  : _startTrial,
+                  : () => _runButtonAction(TunnelState.connecting, _startTrial),
               child: Text(expires == null ? '开始试用' : '继续试用'),
             ),
         ],
@@ -1307,9 +1337,11 @@ class _HomeScreenState extends State<HomeScreen> {
     final label = node == null ? '选择地区' : _nodeRegions[region] ?? node.name;
     final isTrial = _usingTrial;
     final status = switch (_tunnelState.state) {
-      TunnelState.connected => '已连接',
-      TunnelState.connecting => '正在连接',
+      _ when _buttonAction == TunnelState.disconnecting => '正在断开',
       TunnelState.disconnecting => '正在断开',
+      TunnelState.connecting => '正在连接',
+      _ when _buttonAction == TunnelState.connecting => '正在准备连接',
+      TunnelState.connected => '已连接',
       TunnelState.error => '连接异常',
       TunnelState.unavailable => '尚未就绪',
       TunnelState.disconnected => '未连接',
@@ -1346,7 +1378,14 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                     const SizedBox(height: 24),
                     OutlinedButton(
-                      onPressed: _busy || _isConnecting ? null : _toggleTunnel,
+                      onPressed: _busy || _isConnecting
+                          ? null
+                          : () => _runButtonAction(
+                              _isConnected
+                                  ? TunnelState.disconnecting
+                                  : TunnelState.connecting,
+                              _toggleTunnel,
+                            ),
                       style: OutlinedButton.styleFrom(
                         fixedSize: Size.square(
                           bounds.maxHeight < 460 ? 128 : 164,
@@ -1514,7 +1553,10 @@ class _HomeScreenState extends State<HomeScreen> {
     );
     if (!mounted || node == null || _busy || _isConnecting) return;
     if (_isConnected) {
-      await _connectTo(node, switchRegion: true);
+      await _runButtonAction(
+        TunnelState.connecting,
+        () => _connectTo(node, switchRegion: true),
+      );
     } else {
       setState(() => _selectedNode = node);
     }
@@ -1573,7 +1615,8 @@ class _HomeScreenState extends State<HomeScreen> {
     if (_isConnected) {
       await widget.tunnel.disconnect();
       if (widget.tunnel.current.state == TunnelState.disconnected) {
-        await _releaseLease();
+        // A reconnect joins any pending release before reserving a new slot.
+        unawaited(_releaseLease());
       }
       return;
     }
@@ -1651,7 +1694,14 @@ class _HomeScreenState extends State<HomeScreen> {
         if (!mounted) return;
         _selectedNode = requested;
       }
-      await _loadNodes();
+      // With leases, refresh the authorized profile after the slot is assigned.
+      // Only reuse discovery flags for the same API session and device.
+      if (!api.connectionLeases ||
+          _nodesApi != api ||
+          _nodesDeviceId != device.id) {
+        await _loadNodes();
+      }
+      if (!mounted) return;
       final region = _regionCode(requested);
       final regional = api.regionalLeases && _nodeRegions.containsKey(region);
       VpnNode? selectedEndpoint(String? endpointId) {
@@ -1691,17 +1741,16 @@ class _HomeScreenState extends State<HomeScreen> {
         if (regional && lease.endpointId == null) {
           throw StateError('服务器未分配连接线路，请重试');
         }
-        node = selectedEndpoint(lease.endpointId);
-        for (
-          var attempt = 0;
-          attempt < 12 && node?.connectable != true;
-          attempt++
-        ) {
-          await Future<void>.delayed(const Duration(seconds: 1));
-          if (!mounted || _lease == null || _leaseInvalid) break;
+        final readiness = Stopwatch()..start();
+        do {
           await _loadNodes();
           node = selectedEndpoint(lease.endpointId);
-        }
+          if (node?.connectable == true ||
+              readiness.elapsed >= const Duration(seconds: 12)) {
+            break;
+          }
+          await Future<void>.delayed(const Duration(seconds: 1));
+        } while (mounted && _lease != null && !_leaseInvalid);
         if (!mounted ||
             _lease == null ||
             _leaseInvalid ||
@@ -1791,6 +1840,7 @@ class _HomeScreenState extends State<HomeScreen> {
     if (pending != null) return pending;
     final lease = _lease;
     if (lease == null) return true;
+    _leaseInvalid = true; // An in-flight heartbeat must not restart this lease.
     if ((_leaseAge?.elapsed ?? Duration.zero) >= _leaseRemaining) {
       _lease = null;
       _leaseApi = null;

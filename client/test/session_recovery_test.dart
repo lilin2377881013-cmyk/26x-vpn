@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:twentysixx_client/models.dart';
@@ -70,7 +71,131 @@ class _Accounts extends ApiClient {
   Future<List<VpnNode>> loadNodes({String? deviceId}) async => [];
 }
 
+class _LeasedAccount extends _Accounts {
+  final calls = <String>[];
+  final reservation = Completer<void>();
+  final release = Completer<void>();
+  bool authorized = false;
+
+  @override
+  Future<List<VpnNode>> loadNodes({String? deviceId}) async {
+    calls.add('nodes');
+    connectionLeases = regionalLeases = true;
+    return [
+      VpnNode(
+        id: 'hk',
+        code: 'hk',
+        name: 'HK',
+        region: 'HK',
+        status: 'online',
+        endpointId: 'endpoint',
+        protocol: 'hysteria2',
+        host: 'example.test',
+        port: 443,
+        transport: 'udp',
+        connectable: authorized,
+        credentialStatus: authorized ? 'active' : 'pending',
+      ),
+    ];
+  }
+
+  @override
+  Future<ConnectionLease> reserveConnection(
+    String deviceId, {
+    String? token,
+    String? region,
+  }) async {
+    calls.add('reserve $region');
+    await reservation.future;
+    authorized = true;
+    return ConnectionLease(
+      deviceId,
+      'fixture',
+      const Duration(seconds: 90),
+      endpointId: 'endpoint',
+    );
+  }
+
+  @override
+  Future<void> releaseConnection(ConnectionLease lease) async {
+    calls.add('release');
+    await release.future;
+    authorized = false;
+  }
+}
+
+class _TestTunnel extends _Tunnel {
+  final events = StreamController<TunnelSnapshot>.broadcast();
+  @override
+  TunnelSnapshot current = const TunnelSnapshot(TunnelState.disconnected);
+  @override
+  Stream<TunnelSnapshot> get changes => events.stream;
+  final stopped = Completer<void>();
+  @override
+  Future<void> connect(VpnNode node) async {
+    expect(node.endpointId, 'endpoint');
+    events.add(current = const TunnelSnapshot(TunnelState.connected));
+  }
+
+  @override
+  Future<void> disconnect() async {
+    events.add(current = const TunnelSnapshot(TunnelState.disconnecting));
+    await stopped.future;
+    events.add(current = const TunnelSnapshot(TunnelState.disconnected));
+  }
+}
+
 void main() {
+  testWidgets(
+    'connect fetches the assigned profile immediately and disconnect waits only for the tunnel',
+    (tester) async {
+      final api = _LeasedAccount();
+      final tunnel = _TestTunnel();
+      await tester.pumpWidget(
+        MaterialApp(
+          home: HomeScreen(api: api, tunnel: tunnel),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(api.calls, ['nodes']);
+      await tester.tap(find.text('连接 VPN'));
+      await tester.pump();
+      expect(find.text('正在准备连接'), findsWidgets);
+      expect(api.calls, ['nodes', 'reserve HK']);
+      api.reservation.complete();
+      await tester.pump();
+      await tester.pump();
+      expect(find.text('已连接'), findsOneWidget);
+      expect(api.calls, ['nodes', 'reserve HK', 'nodes']);
+      await tester.tap(find.text('断开连接'));
+      await tester.pump();
+      expect(find.text('正在断开'), findsWidgets);
+      expect(api.calls.contains('release'), isFalse);
+      tunnel.stopped.complete();
+      await tester.pump();
+      await tester.pump();
+      expect(find.text('未连接'), findsOneWidget);
+      expect(api.calls.where((c) => c == 'release'), hasLength(1));
+      await tester.tap(find.text('连接 VPN'));
+      await tester.pump();
+      expect(api.calls.last, 'release');
+      api.release.complete();
+      await tester.pump();
+      await tester.pump();
+      expect(find.text('已连接'), findsOneWidget);
+      expect(api.calls, [
+        'nodes',
+        'reserve HK',
+        'nodes',
+        'release',
+        'reserve HK',
+        'nodes',
+      ]);
+      await tester.pumpWidget(const SizedBox());
+      await tunnel.events.close();
+    },
+  );
+
   testWidgets(
     'a returning member can recover after an offline launch without starting a trial',
     (tester) async {

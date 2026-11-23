@@ -201,7 +201,7 @@ private enum MacTunnelManager {
               return
             }
             try session.startTunnel(options: ["xrayJson": xrayJson as NSString])
-            waitForStatus(manager, expected: .connected, timeout: startupTimeout) { connected in
+            TunnelStatusWait.until(.connected, on: session, timeout: startupTimeout) { connected in
               if connected {
                 completion(nil)
               } else {
@@ -254,7 +254,7 @@ private enum MacTunnelManager {
         return
       }
       session.stopTunnel()
-      waitForStatus(manager, expected: .disconnected, timeout: shutdownTimeout) { stopped in
+      TunnelStatusWait.until(.disconnected, on: session, timeout: shutdownTimeout) { stopped in
         if stopped {
           completion(nil)
         } else {
@@ -264,30 +264,6 @@ private enum MacTunnelManager {
     }
   }
 
-  private static func waitForStatus(
-    _ manager: NETunnelProviderManager,
-    expected: NEVPNStatus,
-    timeout: TimeInterval,
-    completion: @escaping (Bool) -> Void
-  ) {
-    let deadline = DispatchTime.now() + timeout
-    var sawConnecting = false
-    func poll() {
-      let status = manager.connection.status
-      if status == expected {
-        completion(true)
-      } else if expected == .disconnected && status == .invalid {
-        completion(true)
-      } else if DispatchTime.now() >= deadline ||
-                  (expected == .connected && sawConnecting && (status == .invalid || status == .disconnected)) {
-        completion(false)
-      } else {
-        sawConnecting = sawConnecting || status == .connecting || status == .reasserting
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2, execute: poll)
-      }
-    }
-    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2, execute: poll)
-  }
 }
 
 private final class TunnelExtensionActivation: NSObject, OSSystemExtensionRequestDelegate {

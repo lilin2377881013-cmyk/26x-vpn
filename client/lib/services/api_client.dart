@@ -434,7 +434,17 @@ class ApiClient {
     connectionLeases = response['connectionLeases'] == true;
     regionalLeases = response['regionalLeases'] == true;
     final items = response['items'] as List<dynamic>? ?? const [];
-    if (!legacy) {
+    final nodes = items.whereType<Map<String, dynamic>>();
+    // Older servers list endpoints but serve their profiles separately.
+    final missingProfiles = nodes
+        .where(
+          (node) =>
+              !node.containsKey('connectionProfile') ||
+              (node['connectable'] == true &&
+                  !VpnNode.fromJson(node).connectable),
+        )
+        .toList();
+    if (!legacy && missingProfiles.isNotEmpty) {
       final credentials = await _request(
         'GET',
         '/api/v1/devices/${Uri.encodeComponent(deviceId)}/credentials',
@@ -445,9 +455,9 @@ class ApiClient {
           for (final item in issued.whereType<Map<String, dynamic>>())
             item['endpointId']: item['connectionProfile'],
         };
-        for (final node in items.whereType<Map<String, dynamic>>()) {
+        for (final node in missingProfiles) {
           final endpoint = node['endpoint'];
-          if (endpoint is Map) {
+          if (endpoint is Map && profiles.containsKey(endpoint['id'])) {
             node['connectionProfile'] = profiles[endpoint['id']];
           }
         }
@@ -458,10 +468,7 @@ class ApiClient {
         );
       }
     }
-    return items
-        .whereType<Map<String, dynamic>>()
-        .map(VpnNode.fromJson)
-        .toList();
+    return nodes.map(VpnNode.fromJson).toList();
   }
 
   Future<ConnectionLease> reserveConnection(

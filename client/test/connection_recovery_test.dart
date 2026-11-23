@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -6,6 +7,82 @@ import 'package:twentysixx_client/services/api_client.dart';
 import 'package:twentysixx_client/services/connection_errors.dart';
 
 void main() {
+  test(
+    'inline profiles need one request and older split responses still work',
+    () async {
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      final api = ApiClient(baseUrl: 'http://127.0.0.1:${server.port}');
+      addTearDown(() async {
+        api.close();
+        await server.close(force: true);
+      });
+      final paths = <String>[];
+      final profile = {
+        'protocol': 'hysteria2',
+        'host': 'example.test',
+        'port': 443,
+        'credential': 'fixture',
+        'serverName': 'example.test',
+      };
+      final complete = {
+        'endpoint': {'id': 'one'},
+        'connectable': true,
+        'connectionProfile': profile,
+      };
+      final pending = {
+        'endpoint': {'id': 'two'},
+        'connectable': false,
+        'connectionProfile': null,
+      };
+      final split = {
+        'endpoint': {'id': 'three'},
+        'connectable': true,
+      };
+      var legacy = false;
+      var items = [complete, pending];
+      server.listen((request) {
+        final path = request.uri.path;
+        paths.add(path);
+        if (legacy && path == '/api/v1/nodes') {
+          request.response.statusCode = 404;
+        } else if (path.endsWith('/credentials')) {
+          request.response.write(
+            jsonEncode({
+              'items': [
+                {'endpointId': 'three', 'connectionProfile': profile},
+              ],
+            }),
+          );
+        } else {
+          request.response.write(
+            jsonEncode({'connectionLeases': true, 'items': items}),
+          );
+        }
+        unawaited(request.response.close());
+      });
+      expect(
+        (await api.loadNodes(deviceId: 'device')).map((n) => n.connectable),
+        [true, false],
+      );
+      expect(paths, ['/api/v1/nodes']);
+      paths.clear();
+      items = [complete, pending, split];
+      expect(
+        (await api.loadNodes(deviceId: 'device')).map((n) => n.connectable),
+        [true, false, true],
+      );
+      expect(paths, ['/api/v1/nodes', '/api/v1/devices/device/credentials']);
+      paths.clear();
+      legacy = true;
+      items = [complete];
+      expect(
+        (await api.loadNodes(deviceId: 'device')).single.connectable,
+        isTrue,
+      );
+      expect(paths, ['/api/v1/nodes', '/api/v1/client/bootstrap']);
+    },
+  );
+
   test(
     'session cookies survive a timeout and are cleared on a confirmed 401',
     () async {

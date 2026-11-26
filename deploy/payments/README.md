@@ -15,14 +15,18 @@ used anywhere in this service. The example prices are the selected release price
 The official USDT contract is pinned in code; arbitrary tokens cannot be enabled.
 
 Fixed prices and conversion calculations use exact integer/rational arithmetic.
-The final invoice adds at most 0.010000 USDT to reserve its six-digit fractional
-identifier. Integer-priced plans share the same 10000-code window across all
-plans, so this configuration permits at most 10000 invoices per wallet before
-rotation. The payment page displays the exact six-decimal amount. An identifier
-is never reused for the same wallet, including after payment or expiry. If the
-near-price code window fills up, issuance stops; change to a merchant-controlled
-new address rather than widening the price adjustment silently. Previously used
-addresses continue to be monitored from `usdt_wallets`.
+Each window has 10,000 identifiers shared across integer-priced plans. The default
+window adds 0.000001 to 0.010000 USDT. A wallet recovered after losing its
+original invoice ledger can use `usdt_wallets.invoice_code_offset=10000` when
+its previous prices were all integers and it only issued codes 000001–010000.
+Configure the wallet row before enabling checkout. This window requires whole
+USDT prices and adds 0.010001 to 0.020000 USDT. The cashier displays the maximum
+adjustment before selection and the exact amount before transfer. Exhaustion
+stops issuance. Paid and expired identifiers stay reserved.
+
+Back up the wallet setting with the invoice ledger. After any further data
+loss, restore both or choose another verified unused range or receiving address.
+Keep prior wallet records so the observer can reconcile their transfers.
 
 `USDT_ACCEPT_PAYMENTS=false` disables new USDT selections; retain the receiving
 address and chain API configuration so the background monitor still settles

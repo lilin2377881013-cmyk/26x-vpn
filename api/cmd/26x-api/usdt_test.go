@@ -572,4 +572,67 @@ func TestUSDTCheckoutMonitorAndReplay(t *testing.T) {
 	if apiCalls.Load() < 3 {
 		t.Fatal("chain confirmation not checked")
 	}
+	t.Run("restored wallet without old invoice history", func(t *testing.T) {
+		const wallet = "T9yD14Nj9j7xAB4dbGeiX9h8unkKHxuWwb"
+		s.cfg.usdt.address = wallet
+		if _, err := db.Exec(`INSERT INTO usdt_wallets(address,invoice_code_offset,last_success_at) VALUES($1,10000,now())`, wallet); err != nil {
+			t.Fatal(err)
+		}
+		first := makeOrder(user("recovered-wallet"))
+		request := httptest.NewRequest("GET", cashierPath+first.token, nil)
+		request.SetPathValue("token", first.token)
+		page := httptest.NewRecorder()
+		s.cashierPage(page, request)
+		if !strings.Contains(page.Body.String(), "0.020000 USDT") {
+			t.Fatal("checkout omitted the new maximum adjustment")
+		}
+		for i := 0; i < 2; i++ {
+			if w := choose(first, "usdt"); w.Code != 303 {
+				t.Fatalf("repeated checkout: HTTP %d", w.Code)
+			}
+		}
+		page = httptest.NewRecorder()
+		s.cashierPage(page, request)
+		if !strings.Contains(page.Body.String(), "5.010001 USDT") {
+			t.Fatal("incorrect first payable amount")
+		}
+		record := chainTransfer{address: wallet, units: "5010000", hash: strings.Repeat("1", 64), block: 1236, at: time.Now()}
+		if err := s.recordUSDTTransfer(ctx, record); err != nil {
+			t.Fatal(err)
+		}
+		if err := db.QueryRow(`SELECT result FROM usdt_transfers WHERE tx_hash=$1`, record.hash).Scan(&result); err != nil || result != "unmatched" {
+			t.Fatal("legacy upper boundary matched a new invoice", result, err)
+		}
+		record.hash, record.units = strings.Repeat("2", 64), "5010001"
+		for i := 0; i < 2; i++ {
+			if err := s.recordUSDTTransfer(ctx, record); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := db.QueryRow(`SELECT count(*) FROM subscriptions WHERE user_id=$1`, first.user).Scan(&count); err != nil || count != 1 {
+			t.Fatal("exact payment/replay did not grant exactly once", count, err)
+		}
+		last := makeOrder(user("last-recovered-code"))
+		if _, err := db.Exec(`INSERT INTO usdt_invoices(order_no,address,token_contract,payment_code,quote_units,amount_units,expires_at)
+			VALUES($1,$2,$3,1,5000000,5000001,now()+interval '1 minute')`, last.number, wallet, usdtContract); err == nil {
+			t.Fatal("old allocator could issue an unsafe code")
+		}
+		if _, err := db.Exec(`WITH orders AS (
+			INSERT INTO payment_orders(order_no,user_id,plan_id,product,amount_cents,duration_days,payment_channel)
+			SELECT 'window_'||i,$1,p.id,'USDT_TRC20',3000,30,'usdt' FROM plans p CROSS JOIN generate_series(10002,19999)i
+			WHERE p.code='standard-30d' RETURNING order_no)
+			INSERT INTO usdt_invoices(order_no,address,token_contract,payment_code,quote_units,amount_units,status,expires_at)
+			SELECT order_no,$2,$3,substring(order_no FROM 8)::int,5000000,5000000+substring(order_no FROM 8)::int,'expired',now()+interval '1 minute' FROM orders`, first.user, wallet, usdtContract); err != nil {
+			t.Fatal(err)
+		}
+		if w := choose(last, "usdt"); w.Code != 303 {
+			t.Fatal("last new code unavailable", w.Code)
+		}
+		if err := db.QueryRow(`SELECT payment_code FROM usdt_invoices WHERE order_no=$1`, last.number).Scan(&count); err != nil || count != 20000 {
+			t.Fatal("incorrect upper boundary", count, err)
+		}
+		if w := choose(makeOrder(user("full-recovered-window")), "usdt"); w.Code != 503 {
+			t.Fatal("full recovered window allowed another invoice", w.Code)
+		}
+	})
 }

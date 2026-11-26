@@ -13,7 +13,7 @@
 {{else}}<p>请选择付款方式：</p>
 {{if .AlipayMaintenance}}<p class="warn">支付宝维护中，暂不可用。你可以选择 USDT 支付。</p>{{end}}
 {{if .Alipay}}<form method="post" action="{{.Root}}{{.Token}}/alipay"><button>支付宝支付</button></form>{{end}}
-{{if .USDT}}<form method="post" action="{{.Root}}{{.Token}}/usdt"><button>USDT · TRC20 支付</button></form><p class="note">USDT 套餐价：{{.Quote}} USDT；下单时会增加不超过 0.010000 USDT 的付款识别尾数，最终金额以付款页为准。</p>{{end}}
+{{if .USDT}}<form method="post" action="{{.Root}}{{.Token}}/usdt"><button>USDT · TRC20 支付</button></form><p class="note">USDT 套餐价为 {{.Quote}} USDT。付款识别尾数最多增加 {{.MaxAdjustment}} USDT，请按下一页的完整金额转账。</p>{{end}}
 <p class="note">选择一种付款方式后，请在该订单内完成付款，勿重复支付。</p>{{end}}
 <p><a style="color:#98e5d8" href="/account">返回官网个人中心</a></p>
 </main></html>

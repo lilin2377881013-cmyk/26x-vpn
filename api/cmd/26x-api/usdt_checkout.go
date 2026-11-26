@@ -135,9 +135,12 @@ func (s *server) cashierPage(w http.ResponseWriter, r *http.Request) {
 	}
 	data := map[string]any{"Testing": s.cfg.usdt != nil && s.cfg.usdt.testMode, "Order": o.number, "Plan": o.planName, "Yuan": fmt.Sprintf("%d.%02d", o.cents/100, o.cents%100), "Token": r.PathValue("token"), "Root": cashierPath, "Paid": o.paid.Valid, "Expired": time.Now().After(o.expires), "Channel": o.channel, "Alipay": s.cfg.payment != nil && !s.cfg.payment.maintenance, "AlipayMaintenance": s.cfg.payment != nil && s.cfg.payment.maintenance, "USDT": false}
 	if g := s.cfg.usdt; g != nil && g.accepting {
-		if quote, e := g.quote(o.planCode, o.cents); e == nil {
+		var offset int64
+		e := s.db.QueryRowContext(r.Context(), `SELECT COALESCE((SELECT invoice_code_offset FROM usdt_wallets WHERE address=$1),0)`, g.address).Scan(&offset)
+		if quote, err := g.quote(o.planCode, o.cents); e == nil && err == nil && (offset == 0 || quote%usdtUnit == 0) {
 			data["USDT"] = true
 			data["Quote"] = formatUSDT(quote)
+			data["MaxAdjustment"] = formatUSDT(offset + 10000)
 		}
 	}
 	if o.channel == "usdt" {
@@ -288,8 +291,12 @@ func (s *server) allocateUSDTInvoice(ctx context.Context, tx *sql.Tx, o checkout
 	}
 	// No address accepts new invoices while monitoring is stale or unavailable.
 	var monitored bool
-	if err := tx.QueryRowContext(ctx, `SELECT last_success_at>now()-interval '2 minutes' FROM usdt_wallets WHERE address=$1`, g.address).Scan(&monitored); err != nil || !monitored {
+	var offset int64
+	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(last_success_at>now()-interval '2 minutes',false),invoice_code_offset FROM usdt_wallets WHERE address=$1`, g.address).Scan(&monitored, &offset); err != nil || !monitored {
 		return errors.New("chain monitoring is not ready")
+	}
+	if offset != 0 && quote%usdtUnit != 0 {
+		return errors.New("recovered wallet requires an integer plan price")
 	}
 	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, "invoice:"+g.address); err != nil {
 		return err
@@ -297,7 +304,7 @@ func (s *server) allocateUSDTInvoice(ctx context.Context, tx *sql.Tx, o checkout
 	var units int64
 	err := tx.QueryRowContext(ctx, `SELECT candidate FROM generate_series($2::bigint+1,$2::bigint+10000) candidate
  WHERE candidate % 1000000 > 0 AND NOT EXISTS(SELECT 1 FROM usdt_invoices WHERE address=$1 AND payment_code=candidate % 1000000)
- ORDER BY candidate LIMIT 1`, g.address, quote).Scan(&units)
+ ORDER BY candidate LIMIT 1`, g.address, quote+offset).Scan(&units)
 	if err != nil {
 		return err
 	}

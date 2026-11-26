@@ -216,14 +216,8 @@ func applyMigrations(ctx context.Context, db *sql.DB, migrationDir string) error
 		if readErr != nil {
 			return readErr
 		}
-		for _, part := range strings.Split(string(statement), ";") {
-			part = strings.TrimSpace(part)
-			if part == "" {
-				continue
-			}
-			if _, err = tx.ExecContext(ctx, part); err != nil {
-				return fmt.Errorf("apply migration %s: %w", version, err)
-			}
+		if _, err = tx.ExecContext(ctx, string(statement)); err != nil {
+			return fmt.Errorf("apply migration %s: %w", version, err)
 		}
 		if _, err = tx.ExecContext(ctx, `INSERT INTO schema_migrations(version) VALUES ($1)`, version); err != nil {
 			return err

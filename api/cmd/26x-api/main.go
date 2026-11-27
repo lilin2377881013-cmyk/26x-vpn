@@ -36,6 +36,8 @@ type config struct {
 	nodeCommand    string
 	payment        *paymentGateway
 	usdt           *usdtGateway
+
+	websiteVisitLog bool
 }
 
 func main() {
@@ -121,6 +123,8 @@ func loadConfig() (config, error) {
 		bootstrapEmail: strings.TrimSpace(strings.ToLower(os.Getenv("INITIAL_ADMIN_EMAIL"))),
 		bootstrapPass:  os.Getenv("INITIAL_ADMIN_PASSWORD"),
 		nodeCommand:    env("NODE_COMMAND", "/opt/26x-node/bin/26x-node"),
+
+		websiteVisitLog: os.Getenv("WEBSITE_VISIT_LOG") == "true",
 	}
 	if !filepath.IsAbs(cfg.nodeCommand) {
 		return cfg, errors.New("NODE_COMMAND must be an absolute path")

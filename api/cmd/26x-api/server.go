@@ -84,6 +84,7 @@ func (s *server) routes() http.Handler {
 	}
 	mux.HandleFunc("GET /api/v1/referrals/{code}", s.referralVisit)
 	mux.HandleFunc("GET /api/v1/referrals/{code}/downloads/{channel}", s.referralDownload)
+	mux.HandleFunc("GET /api/v1/admin/website-visits", s.requireAdmin(s.listWebsiteVisits, "owner", "operations"))
 	mux.HandleFunc("GET /api/v1/admin/referrals", s.requireAdmin(s.listReferrals, "owner", "operations"))
 	mux.HandleFunc("POST /api/v1/admin/referrals", s.requireAdmin(s.withCSRF(s.createReferral), "owner", "operations"))
 	mux.HandleFunc("GET /api/v1/admin/referrals/{code}", s.requireAdmin(s.referralStats, "owner", "operations"))

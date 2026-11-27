@@ -35,6 +35,9 @@ server {
 server {
     listen 443 ssl;
     server_name 26xvpn.com;
+    # Requires conf.d/26x-website-visits.conf. Preserve the ordinary access log.
+    access_log /var/log/nginx/access.log combined;
+    access_log /var/log/nginx/26x-visits.log website_visit if=$log_26x_visit;
 
     ssl_certificate     /etc/letsencrypt/live/26xvpn.com/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/26xvpn.com/privkey.pem;

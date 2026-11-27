@@ -1,0 +1,17 @@
+[Unit]
+Description=Import 26x website visits
+After=postgresql.service
+
+[Service]
+Type=oneshot
+User=26x
+Group=26x
+SupplementaryGroups=adm
+EnvironmentFile=/etc/26x/api.env
+ExecStart=/usr/bin/python3 /opt/26x/visitors/collect.py
+StateDirectory=26x-website-visits
+StateDirectoryMode=0700
+PrivateTmp=yes
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes

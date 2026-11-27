@@ -144,7 +144,9 @@ func (s *server) referralVisit(w http.ResponseWriter, r *http.Request) {
 	target := "/"
 	if referralCodePattern.MatchString(code) {
 		target = "/?ref=" + code
-		s.countReferral(r, code, "")
+		if !s.cfg.websiteVisitLog {
+			s.countReferral(r, code, "")
+		}
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	http.Redirect(w, r, target, http.StatusFound)

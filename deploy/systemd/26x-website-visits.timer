@@ -1,0 +1,10 @@
+[Unit]
+Description=Refresh 26x website visitor records
+
+[Timer]
+OnBootSec=15s
+OnUnitInactiveSec=15s
+AccuracySec=2s
+
+[Install]
+WantedBy=timers.target

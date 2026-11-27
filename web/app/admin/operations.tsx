@@ -559,3 +559,34 @@ export function ReferralLinks() {
     {selected && <ReferralReport key={`${selected}:${refresh}`} code={selected} />}
   </Page>;
 }
+
+type WebsiteVisit = { id: string; time: string; page: string; source: string; device: string; os: string; browser: string };
+const visitTime = new Intl.DateTimeFormat("zh-CN", { dateStyle: "short", timeStyle: "medium", timeZone: "Asia/Shanghai", hour12: false });
+
+export function WebsiteVisits() {
+  const [cursors, setCursors] = useState<string[]>([]);
+  const [refresh, setRefresh] = useState(0);
+  const cursor = cursors.at(-1) ?? "";
+  const { data, error } = useData<{ items: WebsiteVisit[]; hasMore: boolean }>(
+    `/website-visits?before=${encodeURIComponent(cursor)}&refresh=${refresh}`
+  );
+  return <Page title="官网访客" action={<button onClick={() => { setCursors([]); setRefresh(refresh + 1); }}>刷新</button>}>
+    <section className={styles.card}>
+      <p>最近 30 天的公开页面访问，每次加载单独记录。系统和浏览器版本以设备上报为准。</p>
+      {error ? <ErrorMessage message={error} /> : !data ? <p>正在加载访客记录…</p> :
+        data.items.length === 0 ? <p>暂无访问记录。</p> :
+        <table><thead><tr><th>访问时间（北京）</th><th>页面</th><th>推广来源</th><th>设备</th><th>系统</th><th>浏览器</th></tr></thead>
+          <tbody>{data.items.map(row => <tr key={row.id}>
+            <td>{visitTime.format(new Date(row.time))}</td><td>{row.page}</td><td>{row.source}</td>
+            <td>{row.device}</td><td>{row.os}</td><td>{row.browser}</td>
+          </tr>)}</tbody></table>}
+      <div className={styles.pager}>
+        <button disabled={!cursors.length} onClick={() => setCursors(cursors.slice(0, -1))}>上一页</button>
+        <button disabled={!data?.hasMore} onClick={() => {
+          const last = data?.items.at(-1);
+          if (last) setCursors([...cursors, last.id]);
+        }}>下一页</button>
+      </div>
+    </section>
+  </Page>;
+}

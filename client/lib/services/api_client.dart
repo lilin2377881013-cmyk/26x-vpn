@@ -41,7 +41,9 @@ class ApiClient {
          baseUrl ??
              const String.fromEnvironment(
                'API_BASE_URL',
-               defaultValue: 'http://127.0.0.1:8080',
+               defaultValue: kDebugMode
+                   ? 'http://127.0.0.1:8080'
+                   : 'https://26xvpn.com',
              ),
        );
 

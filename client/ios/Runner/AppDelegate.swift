@@ -181,7 +181,12 @@ private final class TunnelBridgePlugin: NSObject, FlutterPlugin, FlutterStreamHa
   }
 
   private func startupFailure(_ error: Error?) -> FlutterError {
-    guard let error = error as NSError?, error.domain == "com.26xvpn.client.tunnel" else {
+    var cause = error as NSError?
+    for _ in 0..<5 {
+      guard let current = cause, current.domain != "com.26xvpn.client.tunnel" else { break }
+      cause = current.userInfo[NSUnderlyingErrorKey] as? NSError
+    }
+    guard let error = cause, error.domain == "com.26xvpn.client.tunnel" else {
       return failure("tunnel_start_failed", "VPN 隧道连接失败。")
     }
     switch error.code {
@@ -201,6 +206,14 @@ private final class TunnelBridgePlugin: NSObject, FlutterPlugin, FlutterStreamHa
       return failure("tunnel_dns_failed", "隧道 DNS 未收到应答。")
     case 1012:
       return failure("probe_execution_failed", "连通性检查模块执行失败。")
+    case 1013:
+      return failure("tunnel_route_file_unreadable", "无法读取 VPN 分流文件。")
+    case 1014:
+      return failure("tunnel_route_file_invalid", "VPN 分流文件内容无效。")
+    case 1015:
+      let systemError = error.userInfo[NSUnderlyingErrorKey] as? NSError
+      return FlutterError(code: "tunnel_route_apply_failed", message: "系统未能应用 VPN 网络设置。",
+                          details: systemError?.code)
     default:
       return failure("tunnel_start_failed", "VPN 隧道连接失败。")
     }

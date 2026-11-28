@@ -177,12 +177,23 @@ void main() {
         'probe_execution_failed',
         'tunnel_dns_failed',
         'tunnel_routes_failed',
+        'tunnel_route_file_unreadable',
+        'tunnel_route_file_invalid',
+        'tunnel_route_apply_failed',
         'tunnel_core_failed',
       ];
       final messages = codes.map(tunnelErrorMessage).toSet();
       expect(messages.length, codes.length);
       expect(tunnelErrorMessage('tunnel_dns_failed'), contains('VPN-TUN-DNS'));
       expect(tunnelErrorMessage('node_unreachable'), contains('VPN-HTTPS'));
+      expect(
+        tunnelErrorMessage('tunnel_route_apply_failed', cause: -7),
+        contains('系统错误 -7'),
+      );
+      expect(
+        tunnelErrorMessage('tunnel_route_apply_failed', cause: 'secret'),
+        isNot(contains('secret')),
+      );
       expect(
         tunnelErrorMessage('private-key=secret'),
         isNot(contains('secret')),

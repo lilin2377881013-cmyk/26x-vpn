@@ -214,7 +214,9 @@ private enum MacTunnelManager {
                   let codes = [1001: "profile_invalid", 1003: "tunnel_routes_failed",
                                1005: "tunnel_core_failed", 1006: "tunnel_data_failed",
                                1009: "node_dns_failed", 1010: "node_unreachable",
-                               1011: "tunnel_dns_failed", 1012: "probe_execution_failed"]
+                               1011: "tunnel_dns_failed", 1012: "probe_execution_failed",
+                               1013: "tunnel_route_file_unreadable", 1014: "tunnel_route_file_invalid",
+                               1015: "tunnel_route_apply_failed"]
                   let code = underlying?.domain == "com.26xvpn.client.tunnel"
                     ? codes[underlying?.code ?? 0] ?? "tunnel_start_failed" : "tunnel_start_failed"
                   completion(TunnelStartError(code: code, message: "VPN 隧道连接失败。"))

@@ -132,7 +132,7 @@ class TunnelController {
       _emit(
         TunnelSnapshot(
           TunnelState.error,
-          message: _safeEngineMessage(error.code),
+          message: _safeEngineMessage(error.code, details: error.details),
         ),
       );
     } on TimeoutException {
@@ -197,8 +197,8 @@ class TunnelController {
     }
   }
 
-  String _safeEngineMessage(String code) =>
-      tunnelErrorMessage(code, windows: Platform.isWindows);
+  String _safeEngineMessage(String code, {Object? details}) =>
+      tunnelErrorMessage(code, windows: Platform.isWindows, cause: details);
 
   void _readNativeState(dynamic value) {
     if (value is! Map) return;

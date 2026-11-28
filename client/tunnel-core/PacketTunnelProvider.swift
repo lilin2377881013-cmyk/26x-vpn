@@ -33,8 +33,13 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         self.setTunnelNetworkSettings(network) { error in
           self.queue.async {
             guard self.generation == generation else { return }
-            if error != nil {
-              self.failStart(self.tunnelError(1003, "系统未能配置 VPN 路由。"))
+            if let systemError = error as NSError? {
+              let cause = NSError(domain: systemError.domain, code: systemError.code)
+              NSLog("26x VPN route settings failed (%@ %ld)", cause.domain, cause.code)
+              self.failStart(NSError(domain: "com.26xvpn.client.tunnel", code: 1015, userInfo: [
+                NSLocalizedDescriptionKey: "系统未能应用 VPN 网络设置。",
+                NSUnderlyingErrorKey: cause,
+              ]))
               return
             }
             do {
@@ -150,9 +155,12 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
   }
 
   private func directIPv4Routes() throws -> [NEIPv4Route] {
-    let invalidRoutes = tunnelError(1003, "VPN 的 IPv4 分流列表缺失或无效。")
     guard let url = Bundle.main.url(forResource: "direct-ipv4-cidrs", withExtension: "txt"),
-          let contents = try? String(contentsOf: url, encoding: .utf8) else {
+          let bytes = try? Data(contentsOf: url) else {
+      throw tunnelError(1013, "无法读取 VPN 扩展中的 IPv4 分流文件。")
+    }
+    let invalidRoutes = tunnelError(1014, "VPN 的 IPv4 分流文件内容无效。")
+    guard let contents = String(data: bytes, encoding: .utf8) else {
       throw invalidRoutes
     }
     let lines = contents.split(whereSeparator: \.isNewline)

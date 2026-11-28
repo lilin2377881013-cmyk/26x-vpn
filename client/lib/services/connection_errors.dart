@@ -19,7 +19,7 @@ String apiRequestStage(String method, String path) {
   return '账号服务 [API-ACCOUNT]';
 }
 
-String tunnelErrorMessage(String code, {bool windows = false}) =>
+String tunnelErrorMessage(String code, {bool windows = false, Object? cause}) =>
     switch (code) {
       'vpn_permission_denied' =>
         windows
@@ -37,6 +37,14 @@ String tunnelErrorMessage(String code, {bool windows = false}) =>
       'tunnel_dns_failed' => '隧道 DNS [VPN-TUN-DNS]：隧道启动后未收到 DNS 应答。',
       'tunnel_data_failed' => '隧道传输 [VPN-DATA]：VPN 数据通道已中断。',
       'tunnel_routes_failed' => '系统路由 [VPN-ROUTES]：系统未能配置 VPN 路由。',
+      'tunnel_route_file_unreadable' =>
+        '分流文件 [VPN-ROUTE-FILE]：无法读取安装包内的分流文件，请联系支持。',
+      'tunnel_route_file_invalid' =>
+        '分流文件 [VPN-ROUTE-FORMAT]：安装包内的分流文件内容无效，请联系支持。',
+      'tunnel_route_apply_failed' =>
+        cause is int
+            ? '系统路由 [VPN-ROUTE-APPLY]：系统未能应用 VPN 网络设置（系统错误 $cause）。'
+            : '系统路由 [VPN-ROUTE-APPLY]：系统未能应用 VPN 网络设置。',
       'system_dns_failed' =>
         '系统 DNS [VPN-SYSTEM-DNS]：隧道 DNS 已应答，但 Windows 未能解析检测域名。',
       'worker_system_dns_rollback_timeout' =>
